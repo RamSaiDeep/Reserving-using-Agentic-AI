@@ -4,14 +4,10 @@ from pydantic import BaseModel
 import json
 from typing import Dict, Any, Optional
 
-from models.triangle import Triangle
-from models.methods import METHODS
-from recommendation import recommend_method
-from agents import ActuarialAgents
+import agent_workflow
 
-app = FastAPI(title="Actuarial Reserving Backend")
+app = FastAPI(title="Agentic Actuarial Reserving Backend")
 
-# Allow frontend to communicate with this backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,116 +16,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class AnalyzeRequest(BaseModel):
-    csv_text: str
-    api_key: Optional[str] = None
-
 class ExecuteRequest(BaseModel):
-    csv_text: str
+    session_id: str
     method_code: str
     params: Dict[str, Any]
     custom_ldfs: list
     api_key: Optional[str] = None
 
 class ChatRequest(BaseModel):
+    session_id: str
     message: str
     history: list
-    context_data: dict
     api_key: Optional[str] = None
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...), api_key: str = Form(None)):
+async def upload_file(
+    file: UploadFile = File(...), 
+    api_key: str = Form(None),
+    n_years: int = Form(5)
+):
     content = await file.read()
     csv_text = content.decode('utf-8')
     
     try:
-        t = Triangle.from_csv(csv_text)
-        summary = t.get_summary()
-        ldfs = t.compute_ldfs()
+        # Step 1: Create session
+        session_id = agent_workflow.create_session(csv_text, n_years, api_key)
         
-        narration = ""
-        if api_key:
-            agents = ActuarialAgents(api_key)
-            narration = agents.narrate_data_summary(summary)
-            
+        # Step 2: Execute Sequential Pipeline
+        narratives, summary, triangle, ldfs = agent_workflow.execute_sequential_pipeline(session_id)
+        
         return {
             "success": True,
+            "session_id": session_id,
             "summary": summary,
             "triangle": {
-                "accidentYears": t.accident_years,
-                "devAges": t.dev_ages,
-                "matrix": t.matrix,
+                "accidentYears": triangle.accident_years,
+                "devAges": triangle.dev_ages,
+                "matrix": triangle.matrix,
                 "ldfs": ldfs
             },
-            "csv_text": csv_text,
-            "narration": narration
+            "narratives": narratives
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
-
-@app.post("/api/analyze")
-async def analyze_data(req: AnalyzeRequest):
-    try:
-        t = Triangle.from_csv(req.csv_text)
-        summary = t.get_summary()
-        
-        rec = recommend_method(summary)
-        
-        narration = ""
-        if req.api_key:
-            agents = ActuarialAgents(req.api_key)
-            narration = agents.narrate_analysis(rec, summary)
-            
-        return {
-            "success": True,
-            "recommendation": rec,
-            "narration": narration
-        }
-    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"success": False, "error": str(e)}
 
 @app.post("/api/execute")
 async def execute_model(req: ExecuteRequest):
     try:
-        t = Triangle.from_csv(req.csv_text)
-        
-        MethodClass = METHODS.get(req.method_code)
-        if not MethodClass:
-            return {"success": False, "error": "Invalid method code"}
+        session = agent_workflow.SESSION_STORE.get(req.session_id)
+        if not session:
+            return {"success": False, "error": "Invalid session_id"}
             
-        # Insert UI premiums if provided via params
-        if 'premiums' in req.params:
-            for ay_str, prem in req.params['premiums'].items():
-                t.premiums[int(ay_str)] = float(prem)
-                
-        model = MethodClass()
-        model.fit(t, req.params, req.custom_ldfs)
+        session['params'] = req.params
+        session['custom_ldfs'] = req.custom_ldfs # if we want to override ldfs
         
-        results = model.get_results()
-        total_ibnr = model.get_total_ibnr()
-        total_ult = model.get_total_ultimate()
-        diag = t.get_latest_diagonal()
+        # Agent 6: Execution Agent
+        sys_inst = "You are the Execution Agent. You MUST call `run_actuarial_model`. Then narrate the result."
+        prompt = f"Session: {req.session_id}, Method: {req.method_code}"
+        
+        msg = agent_workflow.run_agent(req.api_key, sys_inst, prompt, [agent_workflow.run_actuarial_model])
+        
+        results = session.get('results', {})
+        # Note: to get the actual array of results, we need the model's get_results() array.
+        # Let's quickly pull it from the triangle mathematically or modify the tool to save it.
+        # Actually, since the LLM ran it, we can re-run it deterministically to get the array for the frontend UI.
+        from models.methods import METHODS
+        MethodClass = METHODS.get(req.method_code)
+        model = MethodClass()
+        model.fit(session['triangle'], req.params, req.custom_ldfs)
+        
+        diag = session['triangle'].get_latest_diagonal()
         total_paid = sum(v for v in diag if v is not None)
         
-        narration = ""
-        if req.api_key:
-            agents = ActuarialAgents(req.api_key)
-            exec_data = {
-                "method": MethodClass.label,
-                "totalIBNR": total_ibnr,
-                "totalUlt": total_ult,
-                "totalPaid": total_paid,
-                "params": req.params
-            }
-            narration = agents.narrate_execution(exec_data)
-            
         return {
             "success": True,
-            "results": results,
-            "totalIBNR": total_ibnr,
-            "totalUlt": total_ult,
+            "results": model.get_results(),
+            "totalIBNR": model.get_total_ibnr(),
+            "totalUlt": model.get_total_ultimate(),
             "totalPaid": total_paid,
-            "narration": narration
+            "narration": msg
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -140,8 +107,7 @@ async def chat(req: ChatRequest):
         if not req.api_key:
             return {"success": False, "error": "API key required"}
             
-        agents = ActuarialAgents(req.api_key)
-        reply = agents.chat(req.message, req.history, req.context_data)
+        reply = agent_workflow.run_parallel_chat(req.session_id, req.message, req.history)
         
         return {"success": True, "reply": reply}
     except Exception as e:
