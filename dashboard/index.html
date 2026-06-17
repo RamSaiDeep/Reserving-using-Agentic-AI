@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Actuarial Reserving Platform</title>
+  <meta name="description" content="AI-assisted actuarial loss reserving — Chain Ladder, BF, Benktander, Cape Cod, Mack, Case Outstanding, Clark.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── Top Bar ──────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-brand">Actuarial <span>Reserve</span></div>
+
+    <!-- Step progress -->
+    <div id="step-bar"></div>
+
+    <div class="topbar-right">
+      <button class="api-key-btn" id="api-key-btn">
+        <div class="api-key-indicator" id="api-key-indicator" title="Gemini not connected"></div>
+        Gemini API Key
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Left Panel: Agent Log + Chat ─────────────────────────── -->
+  <aside class="left-panel">
+    <div class="left-panel-header">
+      ◆ Agent Activity &amp; Chat
+    </div>
+
+    <div id="agent-log">
+      <!-- Populated by app.js -->
+    </div>
+
+    <div class="chat-input-area">
+      <textarea
+        id="chat-input"
+        placeholder="Ask anything about your reserves… (Enter to send)"
+        rows="1"></textarea>
+      <button id="chat-send">Send</button>
+    </div>
+  </aside>
+
+  <!-- ── Right Panel: Working Area ────────────────────────────── -->
+  <main class="right-panel" id="right-panel">
+    <!-- Populated dynamically by app.js -->
+  </main>
+
+</div>
+
+<!-- ── API Key Modal ──────────────────────────────────────────── -->
+<div class="modal" id="api-key-modal">
+  <div class="modal-box">
+    <div class="modal-title">Gemini API Key</div>
+    <div class="modal-sub">Your key is stored locally in this browser and never sent to any server other than Google's Gemini API.</div>
+    <input type="password" id="api-key-input" class="modal-input" placeholder="AIza…">
+    <div class="modal-actions">
+      <button class="modal-cancel" id="api-key-cancel">Cancel</button>
+      <button class="modal-save" id="api-key-save">Save Key</button>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts — order matters -->
+<script src="js/triangle.js"></script>
+<script src="js/methods.js"></script>
+<script src="js/gemini.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
