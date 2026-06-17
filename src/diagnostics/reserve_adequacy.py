@@ -1,0 +1,1 @@
+"""Reserve adequacy diagnostic placeholder."""
