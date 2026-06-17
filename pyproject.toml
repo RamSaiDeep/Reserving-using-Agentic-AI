@@ -1,0 +1,18 @@
+[project]
+name = "agentic-reserving-system"
+version = "0.1.0"
+description = "Multi-agent actuarial reserving system"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi",
+  "google-genai",
+  "numpy",
+  "pandas",
+  "pydantic",
+  "python-multipart",
+  "uvicorn",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
