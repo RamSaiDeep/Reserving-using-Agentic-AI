@@ -5,9 +5,9 @@ An AI-assisted actuarial reserving webapp for uploading loss development data, r
 The app is intentionally split into:
 
 - **Dashboard frontend**: static HTML/CSS/JavaScript in `dashboard/`.
-- **FastAPI backend**: API entrypoint in `app/backend/main.py`, with compatibility import from `backend/main.py`.
-- **Domain reserving code**: triangle parsing and reserving methods in `backend/models/`, exposed through the newer `src/` service and agent layers.
-- **Agent orchestration**: supervisor-agent pattern in `src/agents/` so future agents can be added without rewriting existing agents.
+- **FastAPI backend**: API entrypoint in `backend/app/main.py`, with compatibility import from `backend/main.py`.
+- **Domain reserving code**: triangle parsing, reserving methods, services, workflows, and agent business logic under `backend/src/`.
+- **Agent orchestration**: supervisor-agent pattern in `backend/src/agents/` with workflow orchestration space in `backend/src/workflows/` so future agents can be added without rewriting existing agents.
 
 ## What you can do in the webapp
 

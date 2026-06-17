@@ -1,7 +1,7 @@
-from src.agents.base import AgentTask
-from src.agents.supervisor.supervisor_agent import SupervisorAgent
-from src.reserving import registry as method_registry
-from src.services.reserve_service import ReserveService
+from backend.src.agents.base import AgentTask
+from backend.src.agents.supervisor_agent.supervisor_agent import SupervisorAgent
+from backend.src.reserving import registry as method_registry
+from backend.src.services.reserve_service import ReserveService
 
 CSV_TEXT = "accident_year,12,24,36\n2021,100,150,180\n2022,120,170,\n2023,130,,\n"
 
