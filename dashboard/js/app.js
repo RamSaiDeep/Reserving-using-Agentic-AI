@@ -1,12 +1,12 @@
 // ================================================================
-// app.js — Frontend Client for Python Backend
+// app.js — Agentic Frontend Client
 // ================================================================
 
 const API_BASE = 'http://localhost:8000/api';
 
 const State = {
   step: 0,
-  csvText: null,
+  sessionId: null,
   triangle: null,
   summary: null,
   recommendation: null,
@@ -16,9 +16,11 @@ const State = {
   methodParams: {},
   chatHistory: [],
   apiKey: '',
+  baseUrl: '',
+  modelName: '',
 };
 
-const STEPS = ['Upload', 'Data Summary', 'Loss Triangle', 'Select Model', 'IBNR Results'];
+const STEPS = ['Ingestion Pipeline', 'Data Summary', 'Loss Triangle', 'Select Model', 'IBNR Results'];
 
 document.addEventListener('DOMContentLoaded', () => {
   setupDropzone();
@@ -26,38 +28,58 @@ document.addEventListener('DOMContentLoaded', () => {
   setupAPIKey();
   renderStepBar();
   setRightPanel('upload');
-  addAgentMessage('system', 'Backend architecture active. Please start the Python server, then upload a CSV file.');
+  addAgentMessage('system', 'Multi-Agent architecture active. Please start the Python server, then configure your parameters and upload a CSV file.');
 });
 
 // ── API Key ───────────────────────────────────────────────────────
 function setupAPIKey() {
   const btn = document.getElementById('api-key-btn');
   const modal = document.getElementById('api-key-modal');
-  const input = document.getElementById('api-key-input');
+  const inputUrl = document.getElementById('api-baseurl-input');
+  const inputModel = document.getElementById('api-model-input');
+  const inputKey = document.getElementById('api-key-input');
   const save = document.getElementById('api-key-save');
   const cancel = document.getElementById('api-key-cancel');
   const ind = document.getElementById('api-key-indicator');
 
-  const stored = localStorage.getItem('gemini_api_key');
-  if (stored) {
-    State.apiKey = stored;
+  State.baseUrl = localStorage.getItem('ai_base_url') || '';
+  State.modelName = localStorage.getItem('ai_model_name') || '';
+  State.apiKey = localStorage.getItem('ai_api_key') || '';
+
+  if (State.apiKey) {
     ind.classList.add('connected');
-    ind.title = 'Gemini API connected';
+    ind.title = 'AI API connected';
   }
 
-  btn.addEventListener('click', () => { input.value = State.apiKey; modal.classList.add('open'); });
+  btn.addEventListener('click', () => { 
+    inputUrl.value = State.baseUrl;
+    inputModel.value = State.modelName;
+    inputKey.value = State.apiKey;
+    modal.classList.add('open'); 
+  });
+  
   save.addEventListener('click', () => {
-    const key = input.value.trim();
+    const key = inputKey.value.trim();
     if (!key) { showToast('Please enter a valid API key.', 'error'); return; }
+    
+    State.baseUrl = inputUrl.value.trim();
+    State.modelName = inputModel.value.trim();
     State.apiKey = key;
-    localStorage.setItem('gemini_api_key', key);
+    
+    localStorage.setItem('ai_base_url', State.baseUrl);
+    localStorage.setItem('ai_model_name', State.modelName);
+    localStorage.setItem('ai_api_key', key);
+    
     ind.classList.add('connected');
     modal.classList.remove('open');
-    showToast('API key saved for backend.', 'success');
+    showToast('AI Settings saved.', 'success');
   });
+  
   cancel.addEventListener('click', () => modal.classList.remove('open'));
   modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
 }
+
+
 
 // ── UI Helpers ────────────────────────────────────────────────────
 function renderStepBar() {
@@ -132,7 +154,15 @@ function setRightPanel(view, data = {}) {
 
 function renderUploadView() {
   return `
-    <div class="view-header"><h2>Upload Loss Data</h2><p class="view-sub">API powered by Python Backend</p></div>
+    <div class="view-header"><h2>Upload Loss Data</h2><p class="view-sub">Sequential Agent Pipeline</p></div>
+    <div style="margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+      <label style="display:block; margin-bottom:8px; font-weight:500;">Loss Development Factor (LDF) configuration:</label>
+      <div style="display:flex; align-items:center; gap: 12px;">
+        <span>Calculate </span>
+        <input type="number" id="n-years-input" value="5" min="1" max="20" class="param-input" style="width: 80px;">
+        <span> year averages.</span>
+      </div>
+    </div>
     <div class="dropzone" id="dropzone"><div class="dz-icon">↑</div><div class="dz-title">Drop CSV file here</div><input type="file" id="file-input" accept=".csv,.txt" style="display:none"></div>
   `;
 }
@@ -150,31 +180,67 @@ function setupDropzone() {
 
 async function processFile(file) {
   if (!file) return;
-  addAgentMessage('system', `Uploading to backend: <strong>${file.name}</strong>...`);
+  const nYears = document.getElementById('n-years-input').value || 5;
+  
+  const msgId = addAgentMessage('agent', `🚀 Launching Sequential Multi-Agent Pipeline for <strong>${file.name}</strong>...`, 'analyzing');
   
   const formData = new FormData();
   formData.append('file', file);
-  if (State.apiKey) formData.append('api_key', State.apiKey);
+  formData.append('n_years', nYears);
+  if (State.apiKey) {
+    formData.append('api_key', State.apiKey);
+    formData.append('base_url', State.baseUrl);
+    formData.append('model_name', State.modelName);
+  }
 
   try {
     const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
-    const data = await res.json();
-    
-    if (!data.success) throw new Error(data.error);
-    
-    State.csvText = data.csv_text;
-    State.summary = data.summary;
-    State.triangle = data.triangle;
-    State.customLDFs = null; // Clear any cached LDFs from previous runs
-    
-    addAgentMessage('system', `✓ Processed by Python backend.`);
-    if (data.narration) addAgentMessage('agent', data.narration);
-    
-    advanceStep(1);
-    setRightPanel('summary', State.summary);
+    if (!res.ok) throw new Error('Network response was not ok');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === "agent") {
+            addAgentMessage('action', `<strong>[${msg.agent}]</strong> ${msg.text}`);
+            if (msg.agent === "System Error") {
+              updateAgentMessage(msgId, 'Pipeline aborted due to error.');
+            }
+          } else if (msg.type === "complete") {
+            State.sessionId = msg.session_id;
+            State.summary = msg.summary;
+            State.triangle = msg.triangle;
+            State.recommendation = msg.recommendation; // Save the recommendation
+            State.customLDFs = null;
+            
+            updateAgentMessage(msgId, 'Pipeline execution completed. See summary in right panel.');
+            setTimeout(() => {
+              advanceStep(1);
+              setRightPanel('summary', State.summary);
+            }, 1000);
+          } else if (msg.type === "error") {
+            updateAgentMessage(msgId, `Failed: ${msg.message}`);
+          }
+        } catch(err) {
+          console.error("Stream parse error:", err);
+        }
+      }
+    }
   } catch (e) {
-    showToast('Backend Error: ' + e.message, 'error');
-    addAgentMessage('error', `Failed to process: ${e.message}`);
+    showToast('Pipeline Error: ' + e.message, 'error');
+    updateAgentMessage(msgId, `Failed to process: ${e.message}`);
   }
 }
 
@@ -187,7 +253,7 @@ function renderSummaryView(s) {
       <div class="summary-card"><div class="sc-label">Total Paid</div><div class="sc-value">${fmt(s.totalPaid)}</div><div class="sc-detail">latest diagonal</div></div>
       <div class="summary-card"><div class="sc-label">Premium Data</div><div class="sc-value">${s.hasPremium ? 'Yes ✓' : 'No'}</div></div>
     </div>
-    <div style="margin-top:24px; text-align:right;"><button class="btn-run" onclick="viewTriangle()">Generate Loss Triangle →</button></div>`;
+    <div style="margin-top:24px; text-align:right;"><button class="btn-run" onclick="viewTriangle()">Review Loss Triangle →</button></div>`;
 }
 
 function viewTriangle() {
@@ -241,7 +307,7 @@ function renderTriangleView() {
         </tbody>
       </table>
     </div>
-    <div style="margin-top:24px; text-align:right;"><button class="btn-run" onclick="runAnalysis()">Run Analysis & Select Model →</button></div>`;
+    <div style="margin-top:24px; text-align:right;"><button class="btn-run" onclick="proceedToModelSelection()">Select Execution Model →</button></div>`;
 }
 
 function setupLDFEditing() {
@@ -256,50 +322,50 @@ window.changeLDFBase = function(base) {
   setRightPanel('triangle');
 };
 
-async function runAnalysis() {
+function proceedToModelSelection() {
   advanceStep(3);
-  const msgId = addAgentMessage('agent', '🤖 <strong>Analysis Agent</strong> evaluating methods on Python backend…', 'analyzing');
-
-  try {
-    const res = await fetch(`${API_BASE}/analyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ csv_text: State.csvText, api_key: State.apiKey })
-    });
-    const data = await res.json();
-    if (!data.success) throw new Error(data.error);
-
-    State.recommendation = data.recommendation;
-    setRightPanel('model-select', data.recommendation);
-    
-    if (data.narration) updateAgentMessage(msgId, data.narration);
-    else updateAgentMessage(msgId, 'Analysis complete.');
-  } catch (e) {
-    updateAgentMessage(msgId, 'Analysis failed: ' + e.message);
-  }
+  // Show all available methods for user to choose
+  const ranked = [
+    { code: 'BF', label: 'Bornhuetter-Ferguson', desc: 'Uses a priori expected loss ratios.', score: 10, recommended: true, params: [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio', default: 0.65}] },
+    { code: 'CL', label: 'Chain Ladder (Basic)', desc: 'Standard development method.', score: 9, recommended: true, params: [] },
+    { code: 'CC', label: 'Cape Cod', desc: 'Uses an overall loss ratio for stability.', score: 8, recommended: false, params: [{key: 'decay', label: 'Decay Factor', default: 1.0}] },
+    { code: 'BK', label: 'Benktander', desc: 'Iterative blend of BF and CL.', score: 7, recommended: false, params: [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio', default: 0.65}, {key: 'iterations', label: 'Iterations (c)', default: 1}] },
+    { code: 'MCL', label: 'Mack Chain Ladder', desc: 'Calculates standard errors and variance.', score: 6, recommended: false, params: [] },
+    { code: 'CLK', label: 'Clark Stochastic', desc: 'Stochastic curve fitting approximation.', score: 5, recommended: false, params: [{key: 'curveType', label: 'Growth Curve', default: 'loglogistic'}] },
+    { code: 'CO', label: 'Case Outstanding', desc: 'Uses only reported case reserves.', score: 4, recommended: false, params: [] }
+  ];
+  State.ranked = ranked;
+  setRightPanel('model-select', { ranked });
 }
 
-function renderModelSelectView({ ranked, warnings }) {
+function renderModelSelectView({ ranked }) {
   const cards = ranked.map(m => `
-    <div class="method-card ${m.recommended ? 'recommended' : ''} ${m.score <= 1 ? 'disabled' : ''}" onclick="selectMethod('${m.code}')">
+    <div class="method-card ${m.recommended ? 'recommended' : ''}" onclick="selectMethod('${m.code}')">
       <div class="mc-header"><div class="mc-code">${m.code}</div><div class="mc-label">${m.label}</div></div>
       <div class="mc-desc">${m.desc}</div>
-      <div class="mc-score-bar"><div class="mc-score-fill" style="width:${Math.min(m.score * 12, 100)}%"></div></div>
+      <div class="mc-score-bar"><div class="mc-score-fill" style="width:${Math.min(m.score * 10, 100)}%"></div></div>
     </div>`).join('');
-  return `<div class="view-header"><h2>Select Method</h2></div><div class="method-grid">${cards}</div>`;
+  
+  const recHtml = State.recommendation ? `
+    <div style="margin-bottom: 24px; padding: 16px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px;">
+      <h3 style="margin-top: 0; color: #60a5fa; font-size: 14px; margin-bottom: 8px;">✨ AI Recommendation</h3>
+      <div style="font-size: 13px; line-height: 1.5; color: var(--text-main);">${State.recommendation}</div>
+    </div>` : '';
+
+  return `<div class="view-header"><h2>Select Execution Model</h2><p class="view-sub">Select a tool for the Execution Agent</p></div>${recHtml}<div class="method-grid">${cards}</div>`;
 }
 
 window.selectMethod = function(code) {
   State.selectedMethod = code;
-  // Hardcode params req for now since we don't fetch MethodClass logic
-  const params = code === 'BF' || code === 'BK' ? [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio', default: 0.65}] : [];
+  const method = State.ranked.find(m => m.code === code);
+  const params = method ? method.params : [];
   if (params.length > 0) setRightPanel('params', { code, params });
   else submitParams(code);
 };
 
 function renderParamsView({ code, params }) {
   const fields = params.map(p => `<div class="param-field"><label>${p.label}</label><input type="number" id="param-${p.key}" class="param-input" data-key="${p.key}" value="${p.default}" step="any"></div>`).join('');
-  return `<div class="view-header"><h2>Parameters</h2></div><div class="params-container">${fields}<button class="btn-run" onclick="submitParams('${code}')">Execute →</button></div>`;
+  return `<div class="view-header"><h2>Parameters</h2></div><div class="params-container">${fields}<button class="btn-run" onclick="submitParams('${code}')">Execute Tool →</button></div>`;
 }
 
 window.submitParams = async function(code) {
@@ -314,11 +380,13 @@ window.submitParams = async function(code) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        csv_text: State.csvText,
+        session_id: State.sessionId,
         method_code: code,
         params: params,
         custom_ldfs: [...State.customLDFs, 1.0], // add tail
-        api_key: State.apiKey
+        api_key: State.apiKey,
+        base_url: State.baseUrl,
+        model_name: State.modelName
       })
     });
     const data = await res.json();
@@ -326,25 +394,117 @@ window.submitParams = async function(code) {
 
     setRightPanel('results', data);
     
-    if (data.narration) updateAgentMessage(msgId, data.narration);
-    else updateAgentMessage(msgId, 'Execution complete.');
+    updateAgentMessage(msgId, 'Execution complete. Report displayed in right panel.');
   } catch (e) {
     updateAgentMessage(msgId, 'Execution failed: ' + e.message);
   }
 };
 
 function renderResultsView(data) {
-  const rows = data.results.map(r => `<tr><td class="col-ay">${r.ay}</td><td>${fmt(r.paid)}</td><td>${fmt(r.ultimate)}</td><td>${fmt(r.ibnr)}</td></tr>`).join('');
+  // Extract all unique keys from results array to form dynamic columns
+  let keys = new Set();
+  data.results.forEach(r => Object.keys(r).forEach(k => keys.add(k)));
+  keys = Array.from(keys);
+  
+  // Custom ordering: ay, paid, cdfToUlt, pctReported, ultimate, ibnr... then others
+  const coreKeys = ['ay', 'paid', 'cdfToUlt', 'pctReported', 'ultimate', 'ibnr'];
+  const extraKeys = keys.filter(k => !coreKeys.includes(k));
+  const finalKeys = [...coreKeys, ...extraKeys];
+  
+  const headers = finalKeys.map(k => `<th>${k.charAt(0).toUpperCase() + k.slice(1)}</th>`).join('');
+  const rows = data.results.map(r => {
+    return '<tr>' + finalKeys.map(k => {
+      let val = r[k];
+      if (typeof val === 'number') {
+        if (k === 'ay' || k === 'pctReported' || k.includes('ELR') || k.includes('cdf')) val = val;
+        else val = fmt(val);
+      }
+      return `<td>${val != null ? val : '—'}</td>`;
+    }).join('') + '</tr>';
+  }).join('');
+  
   return `
-    <div class="view-header"><h2>IBNR Results</h2><button class="btn-ghost" onclick="setRightPanel('model-select', State.recommendation); advanceStep(3);">← Back</button></div>
+    <div class="view-header"><h2>IBNR Results</h2><button class="btn-ghost" onclick="advanceStep(3); proceedToModelSelection();">← Back</button></div>
     <div class="kpi-strip">
       <div class="kpi-block"><div class="kpi-label">Total IBNR</div><div class="kpi-value">${fmt(data.totalIBNR)}</div></div>
       <div class="kpi-block"><div class="kpi-label">Total Ultimate</div><div class="kpi-value">${fmt(data.totalUlt)}</div></div>
     </div>
-    <table class="results-table">
-      <thead><tr><th>AY</th><th>Paid</th><th>Ultimate</th><th>IBNR</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+    <div class="table-scroll" style="margin-bottom: 24px;">
+      <table class="results-table">
+        <thead><tr>${headers}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <h2 style="margin-bottom: 16px;">Execution Report</h2>
+    <div id="report-container">
+      ${(function() {
+        if (!data.narration) return '<div style="color: rgba(255,255,255,0.5);">Detailed process explanation unavailable.</div>';
+        try {
+          let cleanJson = data.narration.replace(/```json/g, '').replace(/```/g, '').trim();
+          const rep = JSON.parse(cleanJson);
+          
+          let inputsHtml = rep.inputs;
+          if (Array.isArray(rep.inputs)) {
+            inputsHtml = '<ul style="margin: 0; padding-left: 20px; color: rgba(255,255,255,0.9);">' + rep.inputs.map(i => `<li style="margin-bottom: 4px;">${i}</li>`).join('') + '</ul>';
+          } else if (typeof rep.inputs === 'object' && rep.inputs !== null) {
+            inputsHtml = '<ul style="margin: 0; padding-left: 20px; color: rgba(255,255,255,0.9);">' + Object.entries(rep.inputs).map(([k,v]) => `<li style="margin-bottom: 4px;"><strong>${k}:</strong> ${v}</li>`).join('') + '</ul>';
+          }
+
+          const numHtml = Object.entries(rep.output_numbers || {}).map(([k, v]) => `
+            <div style="background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.15); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+              <span style="color: rgba(255,255,255,0.6); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px;">${k}</span>
+              <span style="font-weight: 700; color: #10b981; font-size: 24px;">${fmt(v)}</span>
+            </div>
+          `).join('');
+          
+          return `
+            <div style="display: flex; flex-direction: column; gap: 8px; max-width: 800px; margin: 0 auto;">
+              
+              <!-- Step 1: Inputs -->
+              <div style="background: rgba(255,255,255,0.03); padding: 24px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="color: #60a5fa; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                  <span style="background: #3b82f6; color: white; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 10px;">1</span> REQUIRED INPUTS
+                </div>
+                <div style="font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.9);">${inputsHtml}</div>
+              </div>
+              
+              <!-- Arrow Down -->
+              <div style="text-align: center; color: rgba(255,255,255,0.2); font-size: 20px;">↓</div>
+              
+              <!-- Step 2: Process -->
+              <div style="background: rgba(255,255,255,0.03); padding: 24px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="color: #60a5fa; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                  <span style="background: #3b82f6; color: white; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 10px;">2</span> MATHEMATICAL PROCESS
+                </div>
+                <div style="font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.9);">${rep.process}</div>
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px dashed rgba(255,255,255,0.1); font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.5;">
+                  <strong style="color: #a78bfa; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; display: block; margin-bottom: 4px;">Impact of Exposures</strong> 
+                  ${rep.impact}
+                </div>
+              </div>
+              
+              <!-- Arrow Down -->
+              <div style="text-align: center; color: rgba(16, 185, 129, 0.4); font-size: 20px;">↓</div>
+              
+              <!-- Step 3: Output -->
+              <div style="background: rgba(16, 185, 129, 0.05); padding: 24px; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.05);">
+                <div style="color: #10b981; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+                  <span style="background: #10b981; color: white; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 10px;">3</span> FINAL OUTPUT & RECOMMENDATION
+                </div>
+                <div style="font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.9); margin-bottom: 24px;">${rep.output_text}</div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                  ${numHtml}
+                </div>
+              </div>
+              
+            </div>
+          `;
+        } catch (e) {
+          return `<div style="padding: 16px; background: rgba(255,255,255,0.05); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); font-size: 13px; line-height: 1.6; white-space: pre-wrap;">${data.narration}</div>`;
+        }
+      })()}
+    </div>`;
 }
 
 function setupChat() {
@@ -355,6 +515,7 @@ function setupChat() {
     if (!text) return;
     input.value = '';
     if (!State.apiKey) { showToast('API key required for chat.', 'error'); return; }
+    if (!State.sessionId) { showToast('Upload data first to query the Parallel Agent.', 'error'); return; }
     
     addAgentMessage('user', escapeHTML(text));
     const typingId = addAgentMessage('agent', '…', 'analyzing');
@@ -364,10 +525,12 @@ function setupChat() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          session_id: State.sessionId,
           message: text,
           history: State.chatHistory,
-          context_data: { summary: State.summary, results: State.results },
-          api_key: State.apiKey
+          api_key: State.apiKey,
+          base_url: State.baseUrl,
+          model_name: State.modelName
         })
       });
       const data = await res.json();
