@@ -171,11 +171,13 @@ def run_actuarial_model(session_id: str, method_code: str) -> str:
 # ==========================================
 
 def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, prompt: str, tools: list) -> str:
-    """Helper to run an agent via universal OpenAI client."""
+    # Default to Ollama settings if left blank in the UI
     if not api_key:
-        return "Agent Error: No API key provided."
+        api_key = "ollama"
+    if not base_url:
+        base_url = "https://encrypt-nail-smasher.ngrok-free.dev/v1"
     if not model_name:
-        model_name = "gpt-4o-mini"
+        model_name = "llama3.1"
         
     try:
         client = OpenAI(
@@ -456,6 +458,14 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
     base_url = session.get('base_url')
     model_name = session.get('model_name')
     if not model_name: model_name = "gpt-4o-mini"
+    # Default to Ollama settings if left blank in the UI
+    if not api_key:
+        api_key = "ollama"
+    if not base_url:
+        base_url = "https://encrypt-nail-smasher.ngrok-free.dev/v1"
+    if not model_name:
+        model_name = "llama3.1"
+    
     if not api_key: return "Chat Agent Error: No API key provided."
 
     messages = [{"role": "system", "content": sys_inst}]
