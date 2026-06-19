@@ -301,9 +301,10 @@ class Triangle:
     def compute_cdfs(self, ldfs_list):
         n = len(ldfs_list)
         cdfs = [1.0] * n
-        cdfs[n-1] = ldfs_list[-1]
+        cdfs[n-1] = ldfs_list[-1] if ldfs_list[-1] is not None else 1.0
         for j in range(n-2, -1, -1):
-            cdfs[j] = ldfs_list[j] * cdfs[j+1]
+            val = ldfs_list[j] if ldfs_list[j] is not None else 1.0
+            cdfs[j] = val * cdfs[j+1]
         return cdfs
 
     def get_summary(self):

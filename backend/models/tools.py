@@ -102,7 +102,7 @@ def suggest_elr(triangle) -> float | None:
     if not triangle.premiums:
         return None
     ldfs_raw = triangle.compute_ldfs()
-    ldfs_list = [r['volumeWeighted'] for r in ldfs_raw[:-1]] + [1.0]
+    ldfs_list = [(r['volumeWeighted'] if r['volumeWeighted'] is not None else 1.0) for r in ldfs_raw[:-1]] + [1.0]
     cdfs = triangle.compute_cdfs(ldfs_list)
     diag = triangle.get_latest_diagonal()
     used_up = 0.0
