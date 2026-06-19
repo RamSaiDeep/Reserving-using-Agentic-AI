@@ -178,7 +178,11 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
         model_name = "gpt-4o-mini"
         
     try:
-        client = OpenAI(api_key=api_key, base_url=base_url if base_url else None)
+        client = OpenAI(
+            api_key=api_key, 
+            base_url=base_url if base_url else None,
+            default_headers={"ngrok-skip-browser-warning": "true"}
+        )
     except Exception as e:
         return f"Agent Error: {str(e)}"
     
@@ -489,7 +493,11 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
     ]
     
     try:
-        client = OpenAI(api_key=api_key, base_url=base_url if base_url else None)
+        client = OpenAI(
+            api_key=api_key, 
+            base_url=base_url if base_url else None,
+            default_headers={"ngrok-skip-browser-warning": "true"}
+        )
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
