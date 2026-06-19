@@ -6,7 +6,7 @@
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const API_BASE = isLocalhost 
   ? 'http://localhost:8000/api' 
-  : 'https://YOUR-RENDER-BACKEND.onrender.com/api'; // <--- REPLACE THIS ONCE BACKEND IS DEPLOYED
+  : 'https://reserving-using-agentic-ai.onrender.com/api';
 
 window.__DEMO_TEXT__ = `Line of Business: Private Passenger Auto Liability (short-tail line).
 
