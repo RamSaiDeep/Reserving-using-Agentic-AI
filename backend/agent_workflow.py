@@ -5,7 +5,8 @@ import uuid
 import time
 import concurrent.futures
 from openai import OpenAI
-
+import openai
+import os
 from models.triangle import Triangle
 from models.methods import METHODS
 
@@ -171,13 +172,14 @@ def run_actuarial_model(session_id: str, method_code: str) -> str:
 # ==========================================
 
 def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, prompt: str, tools: list) -> str:
-    # Default to Ollama settings if left blank in the UI
-    if not api_key:
-        api_key = "ollama"
-    if not base_url:
-        base_url = "https://encrypt-nail-smasher.ngrok-free.dev/v1"
-    if not model_name:
-        model_name = "llama3.1"
+    env_api_key = os.environ.get("LLM_API_KEY")
+    env_base_url = os.environ.get("LLM_BASE_URL")
+    env_model_name = os.environ.get("LLM_MODEL_NAME")
+
+    # Fallbacks (Environment > Session > Hardcoded Defaults)
+    api_key = env_api_key or api_key or "ollama"
+    base_url = env_base_url or base_url or "https://encrypt-nail-smasher.ngrok-free.dev/v1"
+    model_name = env_model_name or model_name or "llama3.1"
         
     try:
         client = OpenAI(
@@ -200,6 +202,14 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
                 temperature=0.2
             )
             return response.choices[0].message.content
+        except openai.AuthenticationError:
+            return "Agent Error: Authentication failed. Please verify your Render Environment Variables."
+        except openai.RateLimitError:
+            if attempt == 2:
+                return "Agent Error: Quota/Rate limit exceeded (429). Please wait 60 seconds and try again."
+            time.sleep(2)
+        except openai.APIConnectionError:
+            return "Agent Error: The LLM server is unreachable (API Connection Error)."
         except Exception as e:
             if attempt == 2:
                 return f"Agent Error: {str(e)}"
@@ -215,13 +225,9 @@ def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None
     Generator that yields multi-agent responses progressively. Part 1.
     """
     session = SESSION_STORE[session_id]
-    api_key = session['api_key']
+    api_key = session.get('api_key')
     base_url = session.get('base_url')
     model_name = session.get('model_name')
-    
-    if not api_key:
-        yield json.dumps({"type": "agent", "agent": "System Error", "text": "No API Key provided. Please enter your key in the AI Settings in the top-right corner."}) + "\n"
-        return
     
     def emit(agent, text):
         return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
@@ -458,13 +464,14 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
     base_url = session.get('base_url')
     model_name = session.get('model_name')
     if not model_name: model_name = "gpt-4o-mini"
-    # Default to Ollama settings if left blank in the UI
-    if not api_key:
-        api_key = "ollama"
-    if not base_url:
-        base_url = "https://encrypt-nail-smasher.ngrok-free.dev/v1"
-    if not model_name:
-        model_name = "llama3.1"
+    env_api_key = os.environ.get("LLM_API_KEY")
+    env_base_url = os.environ.get("LLM_BASE_URL")
+    env_model_name = os.environ.get("LLM_MODEL_NAME")
+
+    # Fallbacks
+    api_key = env_api_key or api_key or "ollama"
+    base_url = env_base_url or base_url or "https://encrypt-nail-smasher.ngrok-free.dev/v1"
+    model_name = env_model_name or model_name or "llama3.1"
     
     if not api_key: return "Chat Agent Error: No API key provided."
 
@@ -553,7 +560,11 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
             return final_response.choices[0].message.content
         else:
             return response_msg.content
+    except openai.AuthenticationError:
+        return "Chat Agent Error: Authentication failed. Please verify your Render Environment Variables."
+    except openai.RateLimitError:
+        return "Chat Agent Error: Quota/Rate limit exceeded. Please wait a moment."
+    except openai.APIConnectionError:
+        return "Chat Agent Error: The LLM server is unreachable."
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         return f"Chat Agent Error: {str(e)}"
