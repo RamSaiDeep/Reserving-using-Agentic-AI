@@ -181,22 +181,43 @@ function renderUploadView() {
 
   const descriptionHTML = `
     <div style="margin-top: 20px; padding: 16px; background: rgba(167, 139, 250, 0.05); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 8px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-        <label style="font-weight: 600; color: #a78bfa; font-size: 13px;">✦ Business & Data Context (for AI model recommendation)</label>
-        <button class="btn-ghost" onclick="fillDemoDescription()" style="font-size:11px; padding: 3px 10px; color: #a78bfa; border-color: rgba(167,139,250,0.4);">Try Demo ✦</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+        <label style="font-weight: 600; color: #a78bfa; font-size: 13px;">✦ Business & Data Context</label>
       </div>
-      <textarea
-        id="business-description"
-        rows="6"
-        style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 10px; font-size: 13px; resize: vertical; box-sizing: border-box; line-height: 1.5;"
-        placeholder="Describe your data and business context to help the AI recommend the right model. Key points to include:
-• Line of business (e.g., auto liability, workers' comp, property)
-• Tail length (short-tail or long-tail?)
-• Data volume & history (how many years of data?)
-• Environment stability (any major changes in operations, legal environment, settlement speed?)
-• Claims characteristics (high-frequency/low-severity vs large sporadic claims?)
-• Any known distortions (large CAT events, case reserve changes?)"></textarea>
-      <div style="font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 6px;">The more detail you provide, the more accurate and specific the AI's model recommendation will be.</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div>
+          <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Line of Business</label>
+          <select id="ctx-tail" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px;">
+            <option value="Not Known">Not Known</option>
+            <option value="Short-tail">Short-tail (e.g. Auto Phys Dam, Property)</option>
+            <option value="Long-tail">Long-tail (e.g. Workers Comp, Liability)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Data Volatility</label>
+          <select id="ctx-volatility" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px;">
+            <option value="Not Known">Not Known</option>
+            <option value="Stable">Stable & Credible</option>
+            <option value="Volatile">Thin or Volatile</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Environment</label>
+          <select id="ctx-env" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px;">
+            <option value="Not Known">Not Known</option>
+            <option value="Stable">Stable (No major changes)</option>
+            <option value="Changing">Changing (New ops, reforms)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Distortions</label>
+          <select id="ctx-distort" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px;">
+            <option value="Not Known">Not Known</option>
+            <option value="None">None (Smooth progression)</option>
+            <option value="Present">Present (Large CAT/sporadic claims)</option>
+          </select>
+        </div>
+      </div>
     </div>
   `;
 
@@ -225,14 +246,7 @@ function renderUploadView() {
 }
 
 
-window.fillDemoDescription = function() {
-  const el = document.getElementById('business-description');
-  if (el) {
-    el.value = window.__DEMO_TEXT__;
-    el.style.borderColor = 'rgba(167,139,250,0.6)';
-    setTimeout(() => { el.style.borderColor = 'rgba(167,139,250,0.3)'; }, 800);
-  }
-}
+
 
 window.addRateChangeRow = function() {
   const container = document.getElementById('rate-changes-container');
@@ -348,10 +362,13 @@ async function processFile(file) {
     formData.append('rate_changes_json', JSON.stringify(rate_changes));
   }
   
-  const bizDesc = document.getElementById('business-description');
-  if (bizDesc && bizDesc.value.trim()) {
-    formData.append('business_description', bizDesc.value.trim());
-  }
+  const businessContext = {
+    tail: document.getElementById('ctx-tail')?.value || 'Not Known',
+    volatility: document.getElementById('ctx-volatility')?.value || 'Not Known',
+    environment: document.getElementById('ctx-env')?.value || 'Not Known',
+    distortions: document.getElementById('ctx-distort')?.value || 'Not Known'
+  };
+  formData.append('business_context', JSON.stringify(businessContext));
   
   if (State.apiKey) {
     formData.append('api_key', State.apiKey);

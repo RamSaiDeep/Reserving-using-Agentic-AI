@@ -13,7 +13,7 @@ from models.methods import METHODS
 # Global Session Store
 SESSION_STORE = {}
 
-def create_session(csv_text: str, n_years: int, valuation_year: int = None, api_key: str = None, base_url: str = None, model_name: str = None, business_description: str = None) -> str:
+def create_session(csv_text: str, n_years: int, valuation_year: int = None, api_key: str = None, base_url: str = None, model_name: str = None, business_context: str = None) -> str:
     session_id = str(uuid.uuid4())
     SESSION_STORE[session_id] = {
         'csv_text': csv_text,
@@ -22,7 +22,7 @@ def create_session(csv_text: str, n_years: int, valuation_year: int = None, api_
         'api_key': api_key,
         'base_url': base_url,
         'model_name': model_name,
-        'business_description': business_description or '',
+        'business_context': business_context or '',
         'df': None,
         'triangle': None,
         'ldfs': None,
@@ -261,12 +261,12 @@ def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None
     # 3. Run remaining tools for part 1
     t4 = calculate_ldfs(session_id)
     
-    # 4. Stream Deterministic Outputs via Parallel Agent
-    yield emit("Parallel Agent", f"Data Ingestion: {t1}")
-    yield emit("Parallel Agent", f"Data Quality: {t2}")
-    yield emit("Parallel Agent", preprocessing_text)
-    yield emit("Parallel Agent", f"Triangle Builder: {t3}")
-    yield emit("Parallel Agent", f"LDF Calculator: {t4}")
+    # 4. Stream Deterministic Outputs via Analysis Agent
+    yield emit("Analysis Agent", f"Data Ingestion: {t1}")
+    yield emit("Analysis Agent", f"Data Quality: {t2}")
+    yield emit("Analysis Agent", preprocessing_text)
+    yield emit("Analysis Agent", f"Triangle Builder: {t3}")
+    yield emit("Analysis Agent", f"LDF Calculator: {t4}")
 
     # Pause for conditions input
     yield json.dumps({
@@ -275,6 +275,70 @@ def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None
         "prompt": "Please verify the data conditions for model recommendation.",
         "session_id": session_id
     }) + "\n"
+
+def compute_recommender_matrix(business_context: str, has_premium: bool) -> tuple[str, str]:
+    import json
+    scores = {
+        "Chain Ladder (Development Method) [Code: CL / MCL]": 0,
+        "Bornhuetter-Ferguson (BF) [Code: BF]": 0,
+        "Cape Cod (Stanard-Buhlmann) [Code: CC]": 0,
+        "Benktander [Code: BK]": 0,
+        "Clark Stochastic [Code: CLK]": 0
+    }
+    
+    ctx = {}
+    try:
+        if business_context:
+            ctx = json.loads(business_context)
+    except:
+        pass
+
+    tail = ctx.get('tail', 'Not Known')
+    vol = ctx.get('volatility', 'Not Known')
+    env = ctx.get('environment', 'Not Known')
+    distort = ctx.get('distortions', 'Not Known')
+
+    if tail == "Short-tail": scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 2
+    elif tail == "Long-tail":
+        for m in ["Bornhuetter-Ferguson (BF) [Code: BF]", "Cape Cod (Stanard-Buhlmann) [Code: CC]", "Benktander [Code: BK]"]: scores[m] += 2
+        scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 2
+
+    if vol == "Stable": scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 2
+    elif vol == "Volatile":
+        scores["Cape Cod (Stanard-Buhlmann) [Code: CC]"] += 2
+        scores["Bornhuetter-Ferguson (BF) [Code: BF]"] += 2
+        scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 3
+
+    if env == "Changing":
+        scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 4
+        scores["Bornhuetter-Ferguson (BF) [Code: BF]"] += 1
+    elif env == "Stable":
+        scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 1
+
+    if distort == "Present":
+        scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 3
+        scores["Cape Cod (Stanard-Buhlmann) [Code: CC]"] += 1
+    elif distort == "None":
+        scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 1
+
+    if not has_premium:
+        scores["Bornhuetter-Ferguson (BF) [Code: BF]"] = -999
+        scores["Cape Cod (Stanard-Buhlmann) [Code: CC]"] = -999
+        scores["Benktander [Code: BK]"] = -999
+
+    best_model = max(scores, key=scores.get)
+    
+    reasons = []
+    if tail != "Not Known": reasons.append(f"the line is {tail}")
+    if vol != "Not Known": reasons.append(f"the data is {vol}")
+    if env != "Not Known": reasons.append(f"the environment is {env}")
+    if distort != "Not Known": reasons.append(f"distortions are {distort}")
+    
+    if not has_premium and best_model not in ["Bornhuetter-Ferguson (BF) [Code: BF]", "Cape Cod (Stanard-Buhlmann) [Code: CC]", "Benktander [Code: BK]"]:
+        reasons.append("premium data is unavailable")
+
+    reason_str = "based on your responses" if not reasons else "because " + " and ".join(reasons)
+    return best_model, reason_str
 
 def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     """
@@ -288,91 +352,16 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     def emit(agent, text):
         return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
 
-    t5 = analyze_exposures_and_premiums(session_id)
-    summary = session.get('summary', {})
-    t6 = f"Triangle Summary: {json.dumps(summary)}"
-
-    sys5 = "You are the Actuarial Analyst Agent. Explain in 1-2 sentences how the premium/exposure volume will affect the IBNR calculation based on this data."
+    has_premium = bool(session.get('triangle') and session['triangle'].premiums)
+    business_context = session.get('business_context', '')
     
-    conditions_prompt = ""
-    if conditions:
-        checked = []
-        if conditions.get('credible'): checked.append("large volume of credible historical data")
-        if conditions.get('freq'): checked.append("high-frequency/low-severity lines with stable reporting")
-        if conditions.get('distort'): checked.append("no significant distortion from large claims")
-        if checked:
-            conditions_prompt = f"\nThe user has also confirmed these specific data conditions: {', '.join(checked)}. Factor these into your recommendation."
-
-    business_description = session.get('business_description', '')
-    desc_prompt = f"\nUser's description of their data and business context: \"{business_description}\"" if business_description else ""
-
-    MODEL_KNOWLEDGE = """
-You have full knowledge of the following actuarial reserving methods and their suitability criteria:
-
-**1. Chain Ladder (Development Method) [Code: CL / MCL]**
-USE WHEN: Stable environment (no major org/external changes), high-frequency & low-severity lines, large credible historical data, claims evenly spread, no major large-claim distortion. Works on paid, reported, or claim counts. All lines, all time intervals.
-DO NOT USE WHEN: Major operational changes (new systems, settlement speed changes, case reserve changes), major tort reform, thin/sparse data, highly leveraged long-tail at immature ages, large claim distortions present.
-INPUTS NEEDED: Development triangle (paid or reported claims, or claim counts).
-MACK [MCL]: Same as Chain Ladder but also calculates standard errors and variance around the estimate.
-
-**2. Bornhuetter-Ferguson (BF) [Code: BF]**
-USE WHEN: Long-tail lines at immature accident years (avoids highly leveraged CDFs), thin or volatile data, random fluctuations early in year distort development. A blend of stability (Expected) and responsiveness (Development).
-DO NOT USE WHEN: Unadjusted changes in reporting/payment patterns (distorts CDFs used), wildly inaccurate a priori loss ratio that isn't updated, CDFs below 1.00 (downward development).
-INPUTS NEEDED: Actual reported/paid claims + a priori expected claims + cumulative CDFs. REQUIRES PREMIUM DATA.
-
-**3. Cape Cod (Stanard-Buhlmann) [Code: CC]**
-USE WHEN: Avoid early-year random fluctuations, prefer data-driven expected claim ratio (not judgmental), similar to BF in stability.
-DO NOT USE WHEN: Extremely thin/volatile data, significantly changing product mix, increasing case outstanding adequacy (overreacts strongly).
-INPUTS NEEDED: Historical reported/paid claims + earned premium + cumulative CDFs. REQUIRES PREMIUM DATA.
-
-**4. Benktander [Code: BK]**
-USE WHEN: Iterative blend of BF and Chain Ladder. Use when you want slightly more responsiveness to actual experience than BF, but still more stability than pure CL.
-DO NOT USE WHEN: Same caveats as BF. Highly leveraged immature data.
-INPUTS NEEDED: Same as BF. REQUIRES PREMIUM DATA.
-
-**5. Clark Stochastic [Code: CLK]**
-USE WHEN: Stochastic curve-fitting approach. Useful when you want to model development with a growth curve (loglogistic or Weibull) and produce a distribution of outcomes.
-DO NOT USE WHEN: When a deterministic point estimate is sufficient and curve-fitting assumptions don't hold.
-INPUTS NEEDED: Paid claims triangle.
-
-**6. Case Outstanding Development [Code: CO]**
-USE WHEN: Claims-made coverages or report year analyses where total claims group is fully known, pure IBNR is negligible.
-DO NOT USE WHEN: Most P&C lines where pure IBNR exists; when you lack benchmarks for the ratios.
-INPUTS NEEDED: Case outstanding triangles + incremental paid claims triangles.
-
-**PREMIUM DATA REQUIREMENT**: BF, CC, BK all REQUIRE premium data. If no premium is present in the uploaded data, these methods are NOT available.
-"""
-
-    sys6 = f"""You are the Recommender Agent — an expert actuarial advisor.
-{MODEL_KNOWLEDGE}
-{desc_prompt}
-{conditions_prompt}
-
-Your task:
-1. Analyze the Triangle summary and the user's data/business description (if provided).
-2. Recommend the MOST SUITABLE reserving method from the available options.
-3. Write a CRISP explanation (maximum 50 words) of WHY you are recommending this method. Reference the data characteristics or user conditions briefly.
-4. If the user did NOT provide a business description or conditions, do not complain. Base your recommendation PURELY on the provided Triangle Summary data.
-5. If a method is clearly unsuitable, explicitly state why it should be avoided.
-6. Be highly concise.
-
-Output your recommendation and crisp justification."""
-
-    tasks = [
-        ("Actuarial Analyst Agent", sys5, f"Action Result: {t5}"),
-        ("Recommender Agent", sys6, t6)
-    ]
+    best_model, matrix_reason = compute_recommender_matrix(business_context, has_premium)
     
-    recommender_text = ""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(run_agent, api_key, base_url, model_name, t[1], t[2], []) for t in tasks]
-        for i, future in enumerate(futures):
-            result = future.result() 
-            if tasks[i][0] == "Recommender Agent":
-                recommender_text = result
-                yield emit(tasks[i][0], "I have analyzed the data and provided a model recommendation in the main panel.")
-            else:
-                yield emit(tasks[i][0], result)
+    sys6 = f"""You are the Recommender Agent. The deterministic actuarial matrix has selected '{best_model}' as the most suitable method {matrix_reason}.
+Your task: Explain this recommendation to the user in exactly 1-2 crisp, human-readable sentences. Output ONLY the explanation."""
+
+    recommender_text = run_agent(api_key, base_url, model_name, sys6, "Explain the matrix recommendation.", [])
+    yield emit("Recommender Agent", "I have analyzed the data and provided a model recommendation in the main panel.")
 
     # Final Payload
     updated_session = SESSION_STORE.get(session_id)
@@ -416,35 +405,14 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
         'execution_report': session.get('report')
     }
     
-    sys_inst = f"""
-    You are a Parallel Actuarial Chat Agent. You have access to the complete sequential pipeline state:
-    {json.dumps(context, indent=2)}
-    
-    CRITICAL INSTRUCTION: When the user asks you to analyze or explain the loss development patterns or factors, you MUST structure your analysis strictly around the 6 core criteria:
-    1. Smooth progression
-    2. Stability
-    3. Credibility of experience
-    4. Changes in patterns
-    5. Applicability of the historical experience
-    6. Shock losses/CAT losses
-    Refer directly to the execution_report (which contains the LDF analysis) and the provided LDF curves to justify your explanations.
-    
-    CRITICAL INSTRUCTION: When asked about the Tail Factor or why it was selected, explain that it is selected based on standard actuarial criteria: 
-    - "Reported-to-Paid Ratio" (used if both incurred and paid data are present for the oldest year)
-    - "Curve Fitting" (exponential decay of the selected LDFs, used if no incurred data is present)
-    - "Industry Benchmark" (unavailable in this system).
-    Use the execution_report's tail_factor_selection section to explain the mathematical choice.
-    
-    You have a custom tool called 'calculate_on_level_premiums'. 
-    If the user asks to on-level the premiums or asks for the on-level factor, you MUST:
-    1. Check if the user has provided a rate change history (Effective Dates and Rate Change Percentages).
-    2. If they haven't provided it, ask them to provide it (e.g., 'What are the effective dates and percentages for your rate changes?').
-    3. Once they provide it, use the 'calculate_on_level_premiums' tool to compute the new on-level premiums.
-    4. Provide the computed results to the user.
-    
-    Answer the user's questions about the IBNR, premiums, or models directly and accurately based on the data.
-    If the user asks about models, you must inform them if certain models (like Bornhuetter-Ferguson, Benktander, or Cape Cod) are incompatible due to a lack of premium data in the summary.
-    """
+    sys_inst = f"""You are the Analysis Chat Agent.
+Context: {json.dumps(context)}
+Rules:
+1. If asked about LDF patterns, reference: smoothness, stability, credibility, pattern changes, applicability, and shock losses using the execution_report.
+2. If asked about Tail Factor, explain the choice (Reported-to-Paid, Curve Fitting, or Benchmark) using execution_report.
+3. If asked to on-level premiums, use tool 'calculate_on_level_premiums' if rate history is provided; else ask for it.
+4. If asked about models, mention if BF, CC, or BK are incompatible due to missing premium data.
+Be concise and precise."""
     
     api_key = session.get('api_key')
     base_url = session.get('base_url')

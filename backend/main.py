@@ -61,7 +61,7 @@ async def upload_file(
     n_years: int = Form(5),
     valuation_year: int = Form(None),
     rate_changes_json: str = Form(None),
-    business_description: str = Form(None)
+    business_context: str = Form(None)
 ):
     content = await file.read()
     csv_text = content.decode('utf-8')
@@ -74,7 +74,7 @@ async def upload_file(
             pass
             
     try:
-        session_id = agent_workflow.create_session(csv_text, n_years, valuation_year, api_key, base_url, model_name, business_description)
+        session_id = agent_workflow.create_session(csv_text, n_years, valuation_year, api_key, base_url, model_name, business_context)
         
         return StreamingResponse(
             agent_workflow.execute_sequential_pipeline_part1(session_id, rate_changes),
