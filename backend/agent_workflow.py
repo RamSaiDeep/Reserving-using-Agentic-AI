@@ -268,13 +268,8 @@ def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None
     yield emit("Analysis Agent", f"Triangle Builder: {t3}")
     yield emit("Analysis Agent", f"LDF Calculator: {t4}")
 
-    # Pause for conditions input
-    yield json.dumps({
-        "type": "input_required",
-        "agent": "Recommender Agent",
-        "prompt": "Please verify the data conditions for model recommendation.",
-        "session_id": session_id
-    }) + "\n"
+    # Seamlessly continue to part 2 using the newly provided context dropdowns
+    yield from execute_sequential_pipeline_part2(session_id)
 
 def compute_recommender_matrix(business_context: str, has_premium: bool, n_years: int = None) -> tuple[str, str]:
     import json
