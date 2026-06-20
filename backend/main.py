@@ -87,6 +87,12 @@ async def upload_file(
 
 @app.post("/api/resume_pipeline")
 async def resume_pipeline(req: ResumePipelineRequest):
+    session = agent_workflow.SESSION_STORE.get(req.session_id)
+    if session:
+        if req.api_key: session['api_key'] = req.api_key
+        if req.base_url: session['base_url'] = req.base_url
+        if req.model_name: session['model_name'] = req.model_name
+
     return StreamingResponse(
         agent_workflow.execute_sequential_pipeline_part2(req.session_id, req.conditions),
         media_type="text/event-stream"
@@ -101,6 +107,9 @@ async def execute_model(req: ExecuteRequest):
 
         session['params'] = req.params
         session['custom_ldfs'] = req.custom_ldfs
+        if req.api_key: session['api_key'] = req.api_key
+        if req.base_url: session['base_url'] = req.base_url
+        if req.model_name: session['model_name'] = req.model_name
 
         from models.methods import METHODS
         from models.tools import (get_environment_sensitivity, compute_ibnr_table,
@@ -258,8 +267,11 @@ async def execute_model(req: ExecuteRequest):
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     try:
-        if not req.api_key:
-            return {"success": False, "error": "API key required"}
+        session = agent_workflow.SESSION_STORE.get(req.session_id)
+        if session:
+            if req.api_key: session['api_key'] = req.api_key
+            if req.base_url: session['base_url'] = req.base_url
+            if req.model_name: session['model_name'] = req.model_name
             
         reply = agent_workflow.run_parallel_chat(req.session_id, req.message, req.history)
         
