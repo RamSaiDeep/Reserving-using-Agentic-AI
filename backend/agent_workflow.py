@@ -182,7 +182,7 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     model_name = model_name or env_model_name or "llama3.1"
     
     # Auto-correct Gemini native URL to OpenAI compatible URL
-    if base_url and "generativelanguage.googleapis.com" in base_url and "openai" not in base_url:
+    if base_url and "generativelanguage.googleapis.com" in base_url:
         base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
         
     try:
