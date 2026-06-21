@@ -282,7 +282,8 @@ def compute_recommender_matrix(business_context: str, has_premium: bool, n_years
         "Bornhuetter-Ferguson (BF) [Code: BF]": 0,
         "Cape Cod (Stanard-Buhlmann) [Code: CC]": 0,
         "Benktander [Code: BK]": 0,
-        "Clark Stochastic [Code: CLK]": 0
+        "Clark Stochastic [Code: CLK]": 0,
+        "Expected Loss Ratio [Code: ELR]": 0
     }
     
     ctx = {}
@@ -299,13 +300,14 @@ def compute_recommender_matrix(business_context: str, has_premium: bool, n_years
 
     if tail == "Short-tail": scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 2
     elif tail == "Long-tail":
-        for m in ["Bornhuetter-Ferguson (BF) [Code: BF]", "Cape Cod (Stanard-Buhlmann) [Code: CC]", "Benktander [Code: BK]"]: scores[m] += 2
+        for m in ["Bornhuetter-Ferguson (BF) [Code: BF]", "Cape Cod (Stanard-Buhlmann) [Code: CC]", "Benktander [Code: BK]", "Expected Loss Ratio [Code: ELR]"]: scores[m] += 2
         scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 2
 
     if vol == "Stable": scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 2
     elif vol == "Volatile":
         scores["Cape Cod (Stanard-Buhlmann) [Code: CC]"] += 2
         scores["Bornhuetter-Ferguson (BF) [Code: BF]"] += 2
+        scores["Expected Loss Ratio [Code: ELR]"] += 3
         scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 3
 
     if env == "Changing":
@@ -317,6 +319,7 @@ def compute_recommender_matrix(business_context: str, has_premium: bool, n_years
     if distort == "Present":
         scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 3
         scores["Cape Cod (Stanard-Buhlmann) [Code: CC]"] += 1
+        scores["Expected Loss Ratio [Code: ELR]"] += 2
     elif distort == "None":
         scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 1
 
@@ -324,13 +327,14 @@ def compute_recommender_matrix(business_context: str, has_premium: bool, n_years
         if n_years >= 7:
             scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 2
         elif n_years < 7:
-            for m in ["Bornhuetter-Ferguson (BF) [Code: BF]", "Cape Cod (Stanard-Buhlmann) [Code: CC]", "Benktander [Code: BK]"]: scores[m] += 2
+            for m in ["Bornhuetter-Ferguson (BF) [Code: BF]", "Cape Cod (Stanard-Buhlmann) [Code: CC]", "Benktander [Code: BK]", "Expected Loss Ratio [Code: ELR]"]: scores[m] += 2
             scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 2
 
     if not has_premium:
         scores["Bornhuetter-Ferguson (BF) [Code: BF]"] = -999
         scores["Cape Cod (Stanard-Buhlmann) [Code: CC]"] = -999
         scores["Benktander [Code: BK]"] = -999
+        scores["Expected Loss Ratio [Code: ELR]"] = -999
 
     best_model = max(scores, key=scores.get)
     

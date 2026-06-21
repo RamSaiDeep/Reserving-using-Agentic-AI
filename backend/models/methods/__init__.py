@@ -5,6 +5,7 @@ from .benktander import Benktander
 from .cape_cod import CapeCod
 from .case_outstanding import CaseOutstanding
 from .clark import Clark
+from .expected_loss_ratio import ExpectedLossRatio
 
 METHODS = {
     'CL': ChainLadder,
@@ -13,5 +14,6 @@ METHODS = {
     'BK': Benktander,
     'CC': CapeCod,
     'CO': CaseOutstanding,
-    'CLK': Clark
+    'CLK': Clark,
+    'ELR': ExpectedLossRatio
 }

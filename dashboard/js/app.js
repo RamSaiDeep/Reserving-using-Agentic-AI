@@ -584,6 +584,7 @@ function proceedToModelSelection() {
   let ranked = [
     { code: 'BF', label: 'Bornhuetter-Ferguson', desc: 'Uses a priori expected loss ratios.', score: 10, recommended: true, params: [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio (%)', default: 65}] },
     { code: 'CL', label: 'Chain Ladder (Basic)', desc: 'Standard development method.', score: 9, recommended: true, params: [] },
+    { code: 'ELR', label: 'Expected Loss Ratio', desc: 'Projects mature historical loss ratios onto immature years.', score: 8.5, recommended: false, params: [{key: 'nMatureYears', label: 'Mature Years (n)', default: 5}, {key: 'lrCap', label: 'Loss Ratio Cap', default: 5.0}] },
     { code: 'CC', label: 'Cape Cod', desc: 'Uses an overall loss ratio for stability.', score: 8, recommended: false, params: [{key: 'decay', label: 'Decay Factor', default: 1.0}] },
     { code: 'BK', label: 'Benktander', desc: 'Iterative blend of BF and CL.', score: 7, recommended: false, params: [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio (%)', default: 65}, {key: 'iterations', label: 'Iterations (c)', default: 1}] },
     { code: 'MCL', label: 'Mack Chain Ladder', desc: 'Calculates standard errors and variance.', score: 6, recommended: false, params: [] },
@@ -592,7 +593,7 @@ function proceedToModelSelection() {
   ];
 
   if (State.triangle && !State.triangle.hasPremium) {
-    ranked = ranked.filter(m => !['BF', 'CC', 'BK'].includes(m.code));
+    ranked = ranked.filter(m => !['BF', 'CC', 'BK', 'ELR'].includes(m.code));
   }
 
   State.ranked = ranked;

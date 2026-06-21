@@ -238,7 +238,10 @@ async def execute_model(req: ExecuteRequest):
 
         # ── Store results ─────────────────────────────────────────────────────
         cdfs_curve = t_eval.compute_cdfs(req.custom_ldfs)
-        session['results']   = model.get_results()
+        session['results'] = model.get_results()
+        session['total_ultimate'] = model.get_total_ultimate()
+        session['total_ibnr'] = model.get_total_ibnr()
+        session['volatility'] = getattr(model, 'volatility', None)
         session['cdfs']      = cdfs_curve
         session['ldfs']      = req.custom_ldfs
         session['dev_ages']  = t_eval.dev_ages
@@ -257,7 +260,8 @@ async def execute_model(req: ExecuteRequest):
             "dev_ages":  t_eval.dev_ages,
             "loss_ratios":   loss_ratios,
             "suggested_elr": elr_suggestion,
-            "ldf_stability": ldf_stability
+            "ldf_stability": ldf_stability,
+            "volatility":    session.get('volatility', 0)
         }
     except Exception as e:
         import traceback
