@@ -610,7 +610,6 @@ function renderModelSelectView({ ranked }) {
   
   const recHtml = State.recommendation ? `
     <div style="margin-bottom: 24px; padding: 16px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px;">
-      <h3 style="margin-top: 0; color: #60a5fa; font-size: 14px; margin-bottom: 8px;">✨ AI Recommendation</h3>
       <div style="font-size: 13px; line-height: 1.5; color: var(--text-main);">${State.recommendation}</div>
     </div>` : '';
 
