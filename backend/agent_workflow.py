@@ -353,7 +353,12 @@ def compute_recommender_matrix(business_context: str, has_premium: bool, n_years
         reasons.append("premium data is unavailable")
 
     reason_str = "based on your responses" if not reasons else "because " + " and ".join(reasons)
-    return best_model, reason_str
+    
+    # Sort models by score descending, filter out -999
+    valid_models = {k: v for k, v in scores.items() if v > -900}
+    sorted_models = sorted(valid_models.items(), key=lambda item: item[1], reverse=True)
+    
+    return sorted_models, reason_str
 
 def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     """
@@ -371,12 +376,21 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     business_context = session.get('business_context', '')
     n_years = session.get('n_years')
     
-    best_model, matrix_reason = compute_recommender_matrix(business_context, has_premium, n_years)
+    sorted_models, matrix_reason = compute_recommender_matrix(business_context, has_premium, n_years)
     
-    sys6 = f"""You are the Recommender Agent. The deterministic actuarial matrix has selected '{best_model}' as the most suitable method {matrix_reason}.
-Your task: Explain this recommendation to the user in exactly 1-2 crisp, human-readable sentences. Output ONLY the explanation."""
-
-    recommender_text = run_agent(api_key, base_url, model_name, sys6, "Explain the matrix recommendation.", [])
+    best_model = sorted_models[0][0] if sorted_models else "None"
+    
+    # Construct mechanical Markdown response
+    md_lines = [
+        f"**Mechanical Matrix Recommendation**",
+        f"\nThe optimal method is **{best_model}**, {matrix_reason}.",
+        f"\n### Model Compatibility Scores:",
+        f"*(Higher is better. Incompatible models are hidden)*\n"
+    ]
+    for model, score in sorted_models:
+        md_lines.append(f"- **{model}**: {score} points")
+        
+    recommender_text = "\n".join(md_lines)
     yield emit("Recommender Agent", "I have analyzed the data and provided a model recommendation in the main panel.")
 
     # Final Payload
