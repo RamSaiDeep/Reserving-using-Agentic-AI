@@ -380,17 +380,18 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     
     best_model = sorted_models[0][0] if sorted_models else "None"
     
-    # Construct mechanical Markdown response
+    # Construct mechanical HTML response
     md_lines = [
-        f"**Mechanical Matrix Recommendation**",
-        f"\nThe optimal method is **{best_model}**, {matrix_reason}.",
-        f"\n### Model Compatibility Scores:",
-        f"*(Higher is better. Incompatible models are hidden)*\n"
+        f"<b>Mechanical Matrix Recommendation</b>",
+        f"<br/>The optimal method is <b>{best_model}</b>, {matrix_reason}.",
+        f"<br/><br/><b>Model Compatibility Scores:</b><br/>",
+        f"<i>(Higher is better. Incompatible models are hidden)</i><br/><ul style='margin-top: 8px;'>"
     ]
     for model, score in sorted_models:
-        md_lines.append(f"- **{model}**: {score} points")
+        md_lines.append(f"<li><b>{model}</b>: {score} points</li>")
+    md_lines.append("</ul>")
         
-    recommender_text = "\n".join(md_lines)
+    recommender_text = "".join(md_lines)
     yield emit("Recommender Agent", "I have analyzed the data and provided a model recommendation in the main panel.")
 
     # Final Payload
