@@ -390,6 +390,12 @@ async def export_data(session_id: str):
         triangle = session.get('triangle')
         if not triangle: return JSONResponse(status_code=400, content={"error": "No triangle data"})
         
+        try:
+            from models.diagnostics import compute_diagnostics
+            diag_metrics = compute_diagnostics(triangle)
+        except Exception:
+            diag_metrics = {}
+
         export_obj = {
             "currency": "USD",
             "valuation_year": triangle.valuation_year,
@@ -397,14 +403,15 @@ async def export_data(session_id: str):
             "development_ages": triangle.dev_ages,
             "gross_paid_matrix": triangle.matrix,
             "gross_incurred_matrix": triangle.incurred_matrix,
-            "gross_outstanding_matrix": triangle.outstanding_matrix if hasattr(triangle, 'outstanding_matrix') else None,
-            "closed_claim_counts": triangle.closed_counts_matrix if hasattr(triangle, 'closed_counts_matrix') else None,
-            "reported_claim_counts": triangle.reported_counts_matrix if hasattr(triangle, 'reported_counts_matrix') else None,
+            "gross_outstanding_matrix": getattr(triangle, 'outstanding_matrix', None),
+            "closed_claim_counts": getattr(triangle, 'closed_counts_matrix', None),
+            "reported_claim_counts": getattr(triangle, 'reported_counts_matrix', None),
             "earned_premiums": triangle.premiums,
             "exposures": triangle.exposures,
             "selected_ldfs": session.get('ldfs'),
             "total_ibnr_selected": session.get('totalIBNR'),
-            "total_ultimate_selected": session.get('totalUlt')
+            "total_ultimate_selected": session.get('totalUlt'),
+            "diagnostics": diag_metrics
         }
         
         return JSONResponse(content=export_obj)
