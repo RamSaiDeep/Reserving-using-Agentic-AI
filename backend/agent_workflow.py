@@ -499,6 +499,18 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
         from models.diagnostics import compute_diagnostics
         t = session.get('triangle')
         diag_metrics = compute_diagnostics(t) if t else {}
+        
+        # Prune large matrices to significantly reduce token usage
+        if 'ratio_triangles' in diag_metrics:
+            for key in ['paid_to_incurred', 'settlement_rate']:
+                matrix = diag_metrics['ratio_triangles'].get(key, [])
+                if matrix and isinstance(matrix, list) and len(matrix) > 0 and isinstance(matrix[0], list):
+                    cols = len(matrix[0])
+                    avgs = []
+                    for c in range(cols):
+                        col_vals = [matrix[r][c] for r in range(len(matrix)) if c < len(matrix[r]) and matrix[r][c] is not None]
+                        avgs.append(round(sum(col_vals)/len(col_vals), 3) if col_vals else None)
+                    diag_metrics['ratio_triangles'][key] = {"average_by_development_age": avgs, "note": "Full matrix compressed to averages to save tokens."}
     except Exception:
         diag_metrics = {}
         
