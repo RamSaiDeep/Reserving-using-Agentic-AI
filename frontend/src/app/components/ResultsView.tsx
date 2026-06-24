@@ -10,6 +10,11 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  Legend,
 } from 'recharts';
 
 interface ResultsViewProps {
@@ -27,11 +32,27 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
 
   // 1. Prepare dynamic columns for results table
   let keys: string[] = [];
+  let trendData: any[] = [];
   if (data.results && data.results.length > 0) {
     const keySet = new Set<string>();
     data.results.forEach((r) => Object.keys(r).forEach((k) => keySet.add(k)));
     keys = Array.from(keySet);
+
+    trendData = data.results.map((r: any) => ({
+      ay: r.ay,
+      paid: parseFloat(r.paid) || 0,
+      ibnr: parseFloat(r.ibnr) || 0,
+      ultimate: parseFloat(r.ultimate) || 0,
+      pctReported: (parseFloat(r.pctReported) || 0) * 100,
+      settlementRate: parseFloat(r.ultimate) ? ((parseFloat(r.paid) || 0) / parseFloat(r.ultimate)) * 100 : 0
+    }));
   }
+
+  const lrTrendData = data.loss_ratios?.map((r: any) => ({
+    ay: r.accident_year,
+    paid_lr: r.paid_lr_pct,
+    ultimate_lr: r.ultimate_lr_pct
+  })) || [];
 
   const coreKeys = ['ay', 'paid', 'cdfToUlt', 'pctReported', 'ultimate', 'ibnr'];
   const extraKeys = keys.filter((k) => !coreKeys.includes(k));
@@ -498,6 +519,114 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Diagnostic Trend Graphs ── */}
+      {mounted && trendData.length > 0 && (
+        <div className="mt-8 border-t border-dashed border-white/10 pt-8">
+          <div className="text-sm font-bold text-white mb-6 uppercase tracking-wider">
+            Diagnostic Trends By Accident Year
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            
+            {/* 1. IBNR vs Paid Composition */}
+            <div className="bg-bg-1 border border-border rounded-lg p-5">
+              <div className="text-xs font-semibold text-text-sub mb-4 uppercase tracking-wider">
+                Ultimate Composition (Paid vs IBNR)
+              </div>
+              <div className="w-full h-[250px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={trendData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                    <CartesianGrid stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
+                    <XAxis dataKey="ay" stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} />
+                    <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => fmtShort(v, currency)} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
+                      formatter={(v: number) => fmt(v, currency)}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
+                    <Bar dataKey="paid" name="Paid Claims" stackId="a" fill="#10b981" radius={[0, 0, 4, 4]} />
+                    <Bar dataKey="ibnr" name="IBNR" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* 2. Settlement Rate / Paid-to-Ultimate */}
+            <div className="bg-bg-1 border border-border rounded-lg p-5">
+              <div className="text-xs font-semibold text-text-sub mb-4 uppercase tracking-wider">
+                Settlement Rate (Paid to Ultimate)
+              </div>
+              <div className="w-full h-[250px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="settlementGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
+                    <XAxis dataKey="ay" stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} />
+                    <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => `${v}%`} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
+                      formatter={(v: number) => `${v.toFixed(1)}%`}
+                    />
+                    <Area type="monotone" dataKey="settlementRate" name="Settlement Rate" stroke="#10b981" strokeWidth={2.5} fill="url(#settlementGradient)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* 3. Loss Ratio Trends */}
+            {lrTrendData.length > 0 && (
+              <div className="bg-bg-1 border border-border rounded-lg p-5">
+                <div className="text-xs font-semibold text-text-sub mb-4 uppercase tracking-wider">
+                  Loss Ratio Trends
+                </div>
+                <div className="w-full h-[250px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={lrTrendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
+                      <XAxis dataKey="ay" stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} />
+                      <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => `${v}%`} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
+                        formatter={(v: number) => `${v.toFixed(1)}%`}
+                      />
+                      <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
+                      <Line type="monotone" dataKey="paid_lr" name="Paid LR" stroke="#64748b" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="ultimate_lr" name="Ultimate LR" stroke="#a78bfa" strokeWidth={2.5} dot={{ r: 4 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* 4. % Reported Trends */}
+            <div className="bg-bg-1 border border-border rounded-lg p-5">
+              <div className="text-xs font-semibold text-text-sub mb-4 uppercase tracking-wider">
+                % Reported To Ultimate
+              </div>
+              <div className="w-full h-[250px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
+                    <XAxis dataKey="ay" stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} />
+                    <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => `${v}%`} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
+                      formatter={(v: number) => `${v.toFixed(1)}%`}
+                    />
+                    <Line type="stepAfter" dataKey="pctReported" name="% Reported" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 4 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+          </div>
         </div>
       )}
     </div>
