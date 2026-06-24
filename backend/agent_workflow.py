@@ -9,6 +9,8 @@ import openai
 import os
 from models.triangle import Triangle
 from models.methods import METHODS
+from models.classifier import DataClassifier
+from models.inspector import DataInspector
 
 # Global Session Store
 SESSION_STORE = {}
@@ -37,14 +39,44 @@ def create_session(csv_text: str, n_years: int, valuation_year: int = None, api_
 # ==========================================
 
 def ingest_csv(session_id: str) -> str:
-    """Tool for Agent 1: Converts the raw CSV data into a Pandas DataFrame."""
+    """Tool for Agent 1: Converts the raw CSV data into a Pandas DataFrame, classifies it, and maps reserving roles."""
     session = SESSION_STORE.get(session_id)
     if not session: return "Error: Invalid session ID."
     
     try:
-        df = pd.read_csv(StringIO(session['csv_text']))
+        csv_text = session['csv_text']
+        df = pd.read_csv(StringIO(csv_text))
         session['df'] = df
-        return f"Successfully parsed CSV into DataFrame with {len(df)} rows and {len(df.columns)} columns."
+        session['original_columns'] = list(df.columns)
+        
+        # 1. Run DataClassifier
+        classifier = DataClassifier()
+        classification = classifier.classify_from_bytes(csv_text.encode('utf-8'), "upload.csv")
+        session['classification'] = classification
+        
+        # 2. Run DataInspector
+        inspector = DataInspector(df=df, file_path="upload.csv", data_type=classification.data_type)
+        inspection = inspector.inspect()
+        session['inspection'] = inspection
+        
+        # Mapped roles from inspector
+        roles = inspection.reserving_roles
+        roles_desc = []
+        for role_key, col in roles.items():
+            if col:
+                # Add accumulation state if available
+                state = inspection.accumulation_states.get(col)
+                state_str = f" ({state})" if state else ""
+                roles_desc.append(f"{role_key} -> '{col}'{state_str}")
+        roles_str = ", ".join(roles_desc) if roles_desc else "None"
+        
+        entity_msg = ""
+        if inspection.entity_check.is_multi_entity:
+            entity_msg = f" Note: Detected {inspection.entity_check.entity_count} entities under '{inspection.entity_check.entity_column}'."
+            
+        return (f"Successfully parsed CSV ({len(df)} rows, {len(df.columns)} cols). "
+                f"Classified as '{classification.data_type}' (Confidence: {classification.confidence})."
+                f"{entity_msg} Mapped reserving roles: {roles_str}.")
     except Exception as e:
         return f"Failed to parse CSV: {str(e)}"
 
@@ -82,11 +114,21 @@ def build_loss_triangle(session_id: str) -> str:
     
     try:
         val_year = session.get('valuation_year')
-        t = Triangle(valuation_year=val_year)
+        inspection = session.get('inspection')
+        roles = inspection.reserving_roles if inspection else {}
+        t = Triangle(valuation_year=val_year, roles=roles)
         df = session['df']
         df.columns = [str(c).strip().lower() for c in df.columns]
-        header = list(df.columns)
         
+        # Filter by selected entities if applicable
+        selected_entities = session.get('selected_entities')
+        if selected_entities and inspection and inspection.entity_check.is_multi_entity:
+            ent_col = inspection.entity_check.entity_column
+            col_match = next((c for c in df.columns if c.lower() == ent_col.lower()), None)
+            if col_match:
+                df = df[df[col_match].astype(str).isin(selected_entities)]
+                
+        header = list(df.columns)
         t._format = t._detect_format(header)
         if t._format == 'long':
             t._parse_long(df)
@@ -95,7 +137,35 @@ def build_loss_triangle(session_id: str) -> str:
         t._build_matrix()
             
         session['triangle'] = t
-        session['summary'] = t.get_summary()
+        summary = t.get_summary()
+        summary['original_columns'] = session.get('original_columns', [])
+        
+        # Extract unique entities from the original dataframe
+        entities = []
+        if inspection and inspection.entity_check.is_multi_entity:
+            ent_col = inspection.entity_check.entity_column
+            col_match = next((c for c in session['df'].columns if c.lower() == ent_col.lower()), None)
+            if col_match:
+                entities = sorted(session['df'][col_match].dropna().unique().astype(str).tolist())
+        summary['entities'] = entities
+        summary['selected_entities'] = session.get('selected_entities')
+        
+        classification = session.get('classification')
+        if classification:
+            summary['classification'] = {
+                'data_type': classification.data_type,
+                'confidence': classification.confidence,
+                'is_cas_format': classification.is_cas_format
+            }
+        if inspection:
+            summary['inspection'] = {
+                'is_multi_entity': inspection.entity_check.is_multi_entity,
+                'entity_column': inspection.entity_check.entity_column,
+                'entity_count': inspection.entity_check.entity_count,
+                'reserving_roles': inspection.reserving_roles,
+                'accumulation_states': inspection.accumulation_states
+            }
+        session['summary'] = summary
         return f"Successfully built {t._format} format Triangle."
     except Exception as e:
         import traceback

@@ -50,6 +50,11 @@ class ResumePipelineRequest(BaseModel):
     base_url: Optional[str] = None
     model_name: Optional[str] = None
 
+class UpdateMappingsRequest(BaseModel):
+    session_id: str
+    reserving_roles: Dict[str, Optional[str]]
+    selected_entities: Optional[list] = None
+
 from fastapi.responses import StreamingResponse
 
 @app.post("/api/upload")
@@ -97,6 +102,62 @@ async def resume_pipeline(req: ResumePipelineRequest):
         agent_workflow.execute_sequential_pipeline_part2(req.session_id, req.conditions),
         media_type="text/event-stream"
     )
+
+@app.post("/api/update_mappings")
+async def update_mappings(req: UpdateMappingsRequest):
+    try:
+        session = agent_workflow.SESSION_STORE.get(req.session_id)
+        if not session:
+            return {"success": False, "error": "Invalid session_id"}
+        session['selected_entities'] = req.selected_entities
+        
+        # Update mappings in inspection results
+        inspection = session.get('inspection')
+        if inspection:
+            for k, v in req.reserving_roles.items():
+                inspection.reserving_roles[k] = v
+        else:
+            from models.inspector import InspectionResult, EntityCheckResult
+            session['inspection'] = InspectionResult(
+                columns=[],
+                entity_check=EntityCheckResult(is_multi_entity=False, entity_column=None, entity_count=0, reasons=[]),
+                row_count=len(session['df']),
+                column_count=len(session['df'].columns),
+                reserving_roles=req.reserving_roles
+            )
+
+        # Re-build the triangle
+        t_msg = agent_workflow.build_loss_triangle(req.session_id)
+        if t_msg.startswith("Failed"):
+            return {"success": False, "error": t_msg}
+
+        # Re-calculate LDFs
+        ldf_msg = agent_workflow.calculate_ldfs(req.session_id)
+        if ldf_msg.startswith("Failed"):
+            return {"success": False, "error": ldf_msg}
+
+        # Format and return new triangle and summary
+        triangle = session.get('triangle')
+        triangle_data = None
+        if triangle:
+            triangle_data = {
+                "accidentYears": triangle.accident_years,
+                "devAges": triangle.dev_ages,
+                "matrix": triangle.matrix,
+                "incurred_matrix": triangle.incurred_matrix,
+                "ldfs": session.get('ldfs'),
+                "hasPremium": bool(triangle.premiums)
+            }
+            
+        return {
+            "success": True,
+            "summary": session.get('summary'),
+            "triangle": triangle_data
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
 
 @app.post("/api/execute")
 async def execute_model(req: ExecuteRequest):
@@ -286,5 +347,5 @@ async def chat(req: ChatRequest):
 # Native HTML Hosting
 import os
 from fastapi.staticfiles import StaticFiles
-dashboard_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dashboard"))
+dashboard_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "out"))
 app.mount("/", StaticFiles(directory=dashboard_path, html=True), name="dashboard")

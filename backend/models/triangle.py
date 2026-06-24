@@ -17,8 +17,9 @@ def build_triangle(df, index_col, column_col, value_col, aggfunc="sum"):
     )
 
 class Triangle:
-    def __init__(self, valuation_year=None):
+    def __init__(self, valuation_year=None, roles=None):
         self.valuation_year = valuation_year
+        self.roles = roles or {}
         self._raw_data = defaultdict(lambda: {'paid': None, 'incurred': None, 'count': None})
         self.accident_years = []
         self.dev_ages = []
@@ -96,13 +97,19 @@ class Triangle:
         return None
 
     def _parse_long(self, df):
-        ay_col = self._best_col(df, ['accidentyear', 'accident_year', 'ay', 'origin', 'year'])
-        dev_col = self._best_col(df, ['developmentlag', 'devlag', 'dev_age', 'dev', 'lag', 'age', 'period'])
-        paid_col = self._best_col(df, ['cumpaidloss', 'paid', 'loss'])
-        inc_col = self._best_col(df, ['incurloss', 'incurred', 'reported'])
-        cnt_col = self._best_col(df, ['count', 'claims', 'freq'])
-        prem_col = self._best_col(df, ['earnedpremnet', 'earnedprem', 'premium', 'ep'])
-        exp_col = self._best_col(df, ['exposure', 'units'])
+        def get_col(role_key, candidates):
+            col = self.roles.get(role_key)
+            if col and str(col).strip().lower() in df.columns:
+                return str(col).strip().lower()
+            return self._best_col(df, candidates)
+
+        ay_col = get_col('origin_col', ['accidentyear', 'accident_year', 'ay', 'origin', 'year'])
+        dev_col = get_col('dev_col', ['developmentlag', 'devlag', 'dev_age', 'dev', 'lag', 'age', 'period'])
+        paid_col = get_col('paid_col', ['cumpaidloss', 'paid', 'loss'])
+        inc_col = get_col('incurred_col', ['incurloss', 'incurred', 'reported'])
+        cnt_col = get_col('count_col', ['count', 'claims', 'freq'])
+        prem_col = get_col('premium_col', ['earnedpremnet', 'earnedprem', 'premium', 'ep'])
+        exp_col = get_col('exposure_col', ['exposure', 'units'])
         
         if not ay_col or not dev_col:
             raise ValueError(f"Long format detected but could not find accident_year/dev_age columns.")
@@ -168,7 +175,13 @@ class Triangle:
         
     def _parse_wide(self, df):
         header = list(df.columns)
-        ay_col = self._best_col(df, ['accident_year', 'ay', 'origin', 'year', 'loss_year'])
+        def get_col(role_key, candidates):
+            col = self.roles.get(role_key)
+            if col and str(col).strip().lower() in df.columns:
+                return str(col).strip().lower()
+            return self._best_col(df, candidates)
+
+        ay_col = get_col('origin_col', ['accident_year', 'ay', 'origin', 'year', 'loss_year'])
         if not ay_col: ay_col = header[0]
         
         dev_cols = [c for c in header if c != ay_col and any(char.isdigit() for char in str(c))]
@@ -185,8 +198,8 @@ class Triangle:
             
         self.dev_ages = sorted(list(set(dev_ages)))
         
-        prem_col = self._best_col(df, ['premium', 'ep', 'earned_premium'])
-        exp_col = self._best_col(df, ['exposure', 'exposures', 'units'])
+        prem_col = get_col('premium_col', ['premium', 'ep', 'earned_premium'])
+        exp_col = get_col('exposure_col', ['exposure', 'exposures', 'units'])
         
         ay_set = set()
         for _, row in df.iterrows():
