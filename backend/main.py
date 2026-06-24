@@ -246,48 +246,33 @@ async def execute_model(req: ExecuteRequest):
             "CLK": "Clark Stochastic fits a continuous growth curve (Log-Logistic or Weibull) to the paid triangle using maximum likelihood. Stabilised CDFs from the curve are applied to project ultimates with a distribution of outcomes."
         }
 
-        # ── LEAN Agent Prompt (~100 tokens instead of ~500) ───────────────────
-        sys_inst = (
-            "You are the Analysis Agent. All numbers have been pre-computed by deterministic Python functions. "
-            "Return ONLY a pure JSON object with these keys: "
-            "inputs (1 sentence listing what data was used), "
-            "process (copy the PROCESS field word-for-word, append OLF note if provided), "
-            "output_text (1 sentence summary of total IBNR and Ultimate), "
-            "ldf_analysis (detailed 6-criteria LDF analysis referencing the stability data provided), "
-            "tail_factor_selection (explain the chosen tail factor method and value), "
-            "impact (2 sentences on how premium/exposure changes affect this model). "
-            "Do NOT calculate anything. Do NOT output environment_sensitivity — it is pre-computed. "
-            "Output only the JSON object, no markdown."
-        )
+        # ── Deterministic Report Generation (No Tokens Used) ──────────────────
+        inputs_txt = f"Data used: {len(t_eval.accident_years)} accident years, evaluated to {max(t_eval.dev_ages)} months."
+        if session['triangle'].premiums:
+            inputs_txt += " Premium data was included."
+            
+        process_txt = PROCESS_EXPLANATIONS.get(req.method_code, "")
+        if olf_note:
+            process_txt += f" {olf_note}"
+            
+        output_txt = f"The model projected a Total IBNR of {round(model.get_total_ibnr(), 0):,.0f} and a Total Ultimate of {round(model.get_total_ultimate(), 0):,.0f}."
+        
+        ldf_txt = "LDFs were mathematically computed. "
+        if ldf_stability:
+            ldf_txt += f"Overall stability is based on {len(ldf_stability)} development periods. "
+            
+        impact_txt = "Premium and exposure changes directly scale the A Priori ELR and Expected Ultimates in this model." if session['triangle'].premiums else "No premium or exposure data used in this model."
+        if req.method_code in ['CL', 'MCL', 'CO', 'CLK']:
+            impact_txt = "This method relies purely on historical development patterns, meaning premium/exposure changes do not impact the projection."
 
-        sneak_peek = {
-            "Method": req.method_code,
-            "PROCESS": PROCESS_EXPLANATIONS.get(req.method_code, ""),
-            "OLF_NOTE": olf_note,
-            "Total_Paid": round(total_paid, 0),
-            "Total_IBNR": round(model.get_total_ibnr(), 0),
-            "Total_Ultimate": round(model.get_total_ultimate(), 0),
-            "Has_Premium": bool(session['triangle'].premiums),
-            "Selected_LDFs": req.custom_ldfs,
-            "Tail_Chosen": chosen_reason,
-            "LDF_Stability": ldf_stability,  # CoV, credibility per column — not full grid
+        parsed = {
+            "inputs": inputs_txt,
+            "process": process_txt,
+            "output_text": output_txt,
+            "ldf_analysis": ldf_txt,
+            "tail_factor_selection": f"Selected tail factor: {chosen_reason}.",
+            "impact": impact_txt
         }
-
-        prompt = f"Pre-computed data for your report: {json.dumps(sneak_peek)}"
-        msg = agent_workflow.run_agent(req.api_key, req.base_url, req.model_name, sys_inst, prompt, [])
-
-        # Inject the pre-computed sensitivity back into the parsed report
-        try:
-            import re
-            parsed = json.loads(msg)
-        except Exception:
-            # If JSON parse fails, try stripping markdown fences
-            try:
-                clean = re.sub(r'^```[a-z]*\n?', '', msg.strip(), flags=re.MULTILINE)
-                clean = re.sub(r'```$', '', clean.strip())
-                parsed = json.loads(clean)
-            except Exception:
-                parsed = {"process": msg, "inputs": "", "output_text": "", "ldf_analysis": "", "tail_factor_selection": "", "impact": ""}
 
         parsed["environment_sensitivity"] = env_sensitivity
         parsed["output_numbers"] = {"Total IBNR": round(model.get_total_ibnr(), 0), "Total Ultimate": round(model.get_total_ultimate(), 0)}
