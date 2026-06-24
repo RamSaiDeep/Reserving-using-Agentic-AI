@@ -57,6 +57,7 @@ export interface TriangleData {
   matrix: (number | null)[][];
   incurred_matrix: (number | null)[][];
   ldfs: LDFItem[];
+  incurred_ldfs?: LDFItem[];
   hasPremium: boolean;
 }
 
@@ -75,16 +76,70 @@ export interface RankedModel {
   params: ModelParam[];
 }
 
+export interface MethodConfig {
+  enabled: boolean;
+  source: 'paid' | 'incurred' | 'both';
+  aprioriLossRatio?: number | null;
+  iterations?: number;
+  decay?: number;
+  matureYears?: number[];
+  curveType?: 'weibull' | 'loglogistic';
+}
+
+export type ExecutionConfig = Record<string, MethodConfig>;
+
+export interface MethodResultItem {
+  method: string;
+  source: 'paid' | 'incurred';
+  ultimate: number;
+  ibnr: number;
+  status: 'success' | 'warning' | 'error' | 'disabled';
+  reason?: string | null;
+  assumptions: {
+    aprioriLossRatio?: number | null;
+    iterations?: number;
+    decay?: number;
+    matureYears?: number[];
+    curveType?: string;
+    ldf_basis?: string;
+    tail_factor?: number;
+    [key: string]: any;
+  };
+  results: Record<string, any>[];
+  error?: string | null;
+
+  // Backward compatibility fields
+  code?: string;
+  name?: string;
+  loss_ratio?: number;
+  cv?: number;
+  reserve_to_case_ratio?: number;
+  maturity_score?: number;
+  diff_from_median?: number;
+}
+
+export interface AIRecommendation {
+  recommended_method: string;
+  confidence: 'High' | 'Medium' | 'Low';
+  reasoning: string[];
+}
+
 export interface ExecuteResult {
   success: boolean;
-  results: Record<string, any>[];
-  totalIBNR: number;
-  totalUlt: number;
-  totalPaid: number;
-  narration: string;
-  cdfs: number[];
-  ldfs: number[];
-  dev_ages: number[];
+  run_id?: string;
+  timestamp?: string;
+  selected_methods?: string[];
+  paid_ldfs?: number[];
+  incurred_ldfs?: number[];
+  paid_tail_factor?: number;
+  incurred_tail_factor?: number;
+  configs?: ExecutionConfig;
+  summary: {
+    best_estimate: number;
+    selected_method: string;
+  };
+  ai_recommendation: AIRecommendation;
+  methods: MethodResultItem[];
   loss_ratios?: {
     accident_year: number;
     premium: number;
@@ -111,3 +166,4 @@ export interface ExecuteResult {
   volatility?: number;
   error?: string;
 }
+
