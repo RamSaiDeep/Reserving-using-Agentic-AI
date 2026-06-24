@@ -24,9 +24,10 @@ export default function ModelSelector({
       {recommendation && (
         <div className="mb-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
           <h3 className="mt-0 text-[#60a5fa] text-[13px] font-bold mb-2">✨ AI Recommendation</h3>
-          <div className="text-xs leading-relaxed text-text-main whitespace-pre-line">
-            {recommendation}
-          </div>
+          <div
+            className="text-xs leading-relaxed text-text-main"
+            dangerouslySetInnerHTML={{ __html: recommendation }}
+          />
         </div>
       )}
 
