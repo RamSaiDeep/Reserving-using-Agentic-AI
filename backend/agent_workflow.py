@@ -273,7 +273,8 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
                     {"role": "system", "content": sys_inst},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2
+                temperature=0.2,
+                timeout=15.0
             )
             return response.choices[0].message.content
         except openai.AuthenticationError:
@@ -309,6 +310,9 @@ def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None
     # 1. Run the initial parsing tools
     t1 = ingest_csv(session_id)
     t2 = perform_data_quality_checks(session_id)
+    
+    # Flush Cloudflare/Nginx buffer with 4KB of whitespace padding
+    yield json.dumps({"type": "padding", "data": " " * 4096}) + "\n"
     
     # 2. Process Rate Changes
     t3 = build_loss_triangle(session_id)
@@ -419,7 +423,12 @@ def compute_recommender_matrix(business_context: str, has_premium: bool, n_years
         reasons.append("premium data is unavailable")
 
     reason_str = "based on your responses" if not reasons else "because " + " and ".join(reasons)
-    return best_model, reason_str
+    
+    # Sort models by score descending, filter out -999
+    valid_models = {k: v for k, v in scores.items() if v > -900}
+    sorted_models = sorted(valid_models.items(), key=lambda item: item[1], reverse=True)
+    
+    return sorted_models, reason_str
 
 def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     """
@@ -437,12 +446,22 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     business_context = session.get('business_context', '')
     n_years = session.get('n_years')
     
-    best_model, matrix_reason = compute_recommender_matrix(business_context, has_premium, n_years)
+    sorted_models, matrix_reason = compute_recommender_matrix(business_context, has_premium, n_years)
     
-    sys6 = f"""You are the Recommender Agent. The deterministic actuarial matrix has selected '{best_model}' as the most suitable method {matrix_reason}.
-Your task: Explain this recommendation to the user in exactly 1-2 crisp, human-readable sentences. Output ONLY the explanation."""
-
-    recommender_text = run_agent(api_key, base_url, model_name, sys6, "Explain the matrix recommendation.", [])
+    best_model = sorted_models[0][0] if sorted_models else "None"
+    
+    # Construct mechanical HTML response
+    md_lines = [
+        f"<b>Mechanical Matrix Recommendation</b>",
+        f"<br/>The optimal method is <b>{best_model}</b>, {matrix_reason}.",
+        f"<br/><br/><b>Model Compatibility Scores:</b><br/>",
+        f"<i>(Higher is better. Incompatible models are hidden)</i><br/><ul style='margin-top: 8px;'>"
+    ]
+    for model, score in sorted_models:
+        md_lines.append(f"<li><b>{model}</b>: {score} points</li>")
+    md_lines.append("</ul>")
+        
+    recommender_text = "".join(md_lines)
     yield emit("Recommender Agent", "I have analyzed the data and provided a model recommendation in the main panel.")
 
     # Final Payload
