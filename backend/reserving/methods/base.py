@@ -27,7 +27,11 @@ class MethodBase:
         self.triangle = triangle
         self.params = params
         self.ldfs = custom_ldfs
-        self.cdfs = triangle.compute_cdfs(self.ldfs)
+        from reserving.core.development_engine import DevelopmentEngine
+        if len(custom_ldfs) > 0:
+            self.cdfs = list(DevelopmentEngine.calculate_cdfs(custom_ldfs[:-1], tail_factor=custom_ldfs[-1]))
+        else:
+            self.cdfs = []
         self.results = []
         self.matrix = matrix if matrix is not None else triangle.matrix
         self._compute()

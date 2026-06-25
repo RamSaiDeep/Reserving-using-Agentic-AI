@@ -171,8 +171,9 @@ class FrequencySeverity(MethodBase):
                     projected_paid += future_paid
                 ultimate = projected_paid
                 
+            allow_neg = self.params.get('allow_negative_ibnr', False)
             # Clamp ultimate to incurred claims
-            if ultimate < inc_val:
+            if not allow_neg and ultimate < inc_val:
                 ultimate = inc_val
                 
             ibnr = ultimate - paid

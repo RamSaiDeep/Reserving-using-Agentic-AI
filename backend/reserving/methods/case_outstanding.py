@@ -17,15 +17,16 @@ class CaseOutstanding(MethodBase):
         inc_diag = self.get_incurred_diagonal()
         dev_idx = self.get_development_indices()
         
+        from reserving.core.development_engine import DevelopmentEngine
         # Compute paid CDFs using volume weighted averages
         paid_ldfs_raw = self.triangle.compute_ldfs_for_matrix(self.triangle.matrix)
-        paid_ldfs_list = [(r['volumeWeighted'] if r['volumeWeighted'] is not None else 1.0) for r in paid_ldfs_raw[:-1]] + [1.0]
-        paid_cdfs = self.triangle.compute_cdfs(paid_ldfs_list)
+        paid_ldfs_list = [(r['volumeWeighted'] if r['volumeWeighted'] is not None else 1.0) for r in paid_ldfs_raw[:-1]]
+        paid_cdfs = DevelopmentEngine.calculate_cdfs(paid_ldfs_list, tail_factor=1.0)
         
         # Compute incurred CDFs using volume weighted averages
         inc_ldfs_raw = self.triangle.compute_ldfs_for_matrix(self.triangle.incurred_matrix)
-        inc_ldfs_list = [(r['volumeWeighted'] if r['volumeWeighted'] is not None else 1.0) for r in inc_ldfs_raw[:-1]] + [1.0]
-        inc_cdfs = self.triangle.compute_cdfs(inc_ldfs_list)
+        inc_ldfs_list = [(r['volumeWeighted'] if r['volumeWeighted'] is not None else 1.0) for r in inc_ldfs_raw[:-1]]
+        inc_cdfs = DevelopmentEngine.calculate_cdfs(inc_ldfs_list, tail_factor=1.0)
         
         for i, ay in enumerate(ays):
             paid = diag[i] or 0.0

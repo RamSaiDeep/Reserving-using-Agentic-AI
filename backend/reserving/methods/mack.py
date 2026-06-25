@@ -68,9 +68,10 @@ class MackChainladder(MethodBase):
             idx = dev_idx[i]
             cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
             
+            allow_neg = self.params.get('allow_negative_ibnr', False)
             ultimate = projected_matrix[i, n_periods - 1]
             inc_val = inc_diag[i] or 0.0
-            if ultimate < inc_val:
+            if not allow_neg and ultimate < inc_val:
                 ultimate = inc_val
                 
             ibnr = ultimate - paid

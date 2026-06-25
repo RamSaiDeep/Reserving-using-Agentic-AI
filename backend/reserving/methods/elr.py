@@ -30,11 +30,12 @@ class ExpectedLossRatio(MethodBase):
             cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
             prem = self.triangle.premiums.get(ay, 0)
             
+            allow_neg = self.params.get('allow_negative_ibnr', False)
             ultimate = prem * elr
             
             # Clamp ultimate to incurred claims
             inc_val = inc_diag[i] or 0.0
-            if ultimate < inc_val:
+            if not allow_neg and ultimate < inc_val:
                 ultimate = inc_val
                 
             ibnr = ultimate - paid

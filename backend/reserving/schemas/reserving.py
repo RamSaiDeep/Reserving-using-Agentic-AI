@@ -13,6 +13,8 @@ class MethodConfig(BaseModel):
     curveType: Optional[str] = None
     approach: Optional[str] = None
     inflationRate: Optional[float] = None
+    allow_negative_ibnr: Optional[bool] = False
+    legacy_compatibility: Optional[bool] = True
 
 class ExecuteRequest(BaseModel):
     session_id: str
@@ -22,6 +24,8 @@ class ExecuteRequest(BaseModel):
     paid_tail_factor: Optional[float] = 1.0
     incurred_tail_factor: Optional[float] = 1.0
     mature_cdf_threshold: Optional[float] = 1.05
+    allow_negative_ibnr: Optional[bool] = False
+    legacy_compatibility: Optional[bool] = True
     
     # Backward compatibility fields
     method_code: Optional[str] = None

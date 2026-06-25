@@ -60,6 +60,14 @@ def standardize_method_output(
     
     negative_ibnr_ays = []
     
+    cfg = configs.get(code) if configs else None
+    allow_negative_ibnr = False
+    if cfg is not None:
+        if hasattr(cfg, 'allow_negative_ibnr'):
+            allow_negative_ibnr = getattr(cfg, 'allow_negative_ibnr', False)
+        elif isinstance(cfg, dict):
+            allow_negative_ibnr = cfg.get('allow_negative_ibnr', False)
+
     for i, ay in enumerate(ays):
         p_ay = paid_diag[i]
         r_ay = incurred_diag[i]
@@ -69,11 +77,15 @@ def standardize_method_output(
         u_ay = m_res.get('ultimate', p_ay)
         
         # Enforce that Ultimate cannot be less than Reported to prevent negative IBNR
-        if u_ay < r_ay:
+        if not allow_negative_ibnr and u_ay < r_ay:
             u_ay = r_ay
             
         # Calculate IBNR = Ultimate - Reported
-        ibnr_ay = max(0.0, u_ay - r_ay)
+        if allow_negative_ibnr:
+            ibnr_ay = u_ay - r_ay
+        else:
+            ibnr_ay = max(0.0, u_ay - r_ay)
+            
         if ibnr_ay < 0:
             negative_ibnr_ays.append(int(ay))
             

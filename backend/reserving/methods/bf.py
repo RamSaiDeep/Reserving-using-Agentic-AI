@@ -23,6 +23,8 @@ class BornhuetterFerguson(MethodBase):
         inc_diag = self.get_incurred_diagonal()
         
         elr = float(self.params.get('aprioriLossRatio', 65)) / 100.0
+        legacy_comp = self.params.get('legacy_compatibility', True)
+        allow_neg = self.params.get('allow_negative_ibnr', False)
         
         for i, ay in enumerate(ays):
             claims_val = diag[i] or 0.0
@@ -30,15 +32,22 @@ class BornhuetterFerguson(MethodBase):
             cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
             prem = self.triangle.premiums.get(ay, 0)
             
-            percent_unreported = 1.0 / cdf if cdf > 0 else 1.0
-            percent_reported = 1.0 - percent_unreported
-            
             expected_ultimate = elr * prem
-            ultimate = (percent_unreported * expected_ultimate) + (percent_reported * claims_val)
             
-            # Clamp ultimate to incurred claims
+            if legacy_comp:
+                percent_unreported = 1.0 / cdf if cdf > 0 else 1.0
+                percent_reported = 1.0 - percent_unreported
+                ultimate = (percent_unreported * expected_ultimate) + (percent_reported * claims_val)
+                percent_rep_display = percent_reported
+            else:
+                pct_reported = 1.0 / cdf if cdf > 0 else 1.0
+                pct_unreported = 1.0 - pct_reported
+                ultimate = claims_val + expected_ultimate * pct_unreported
+                percent_rep_display = pct_reported
+            
+            # Clamp ultimate to incurred claims if not allow_neg
             inc_val = inc_diag[i] or 0.0
-            if ultimate < inc_val:
+            if not allow_neg and ultimate < inc_val:
                 ultimate = inc_val
                 
             ibnr = ultimate - claims_val
@@ -47,7 +56,7 @@ class BornhuetterFerguson(MethodBase):
                 'ay': ay,
                 'paid': claims_val,
                 'cdfToUlt': round(cdf, 4),
-                'pctReported': round(percent_reported * 100, 1),
+                'pctReported': round(percent_rep_display * 100, 1),
                 'ultimate': ultimate,
                 'ibnr': ibnr,
                 'premium': prem

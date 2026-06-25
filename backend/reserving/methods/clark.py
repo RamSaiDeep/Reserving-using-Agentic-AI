@@ -33,10 +33,11 @@ class Clark(MethodBase):
             
             # Smoothed CDF approximation for Clark
             smoothed_cdf = max(1.0, cdf * 0.98 + 0.02)
+            allow_neg = self.params.get('allow_negative_ibnr', False)
             ultimate = paid * smoothed_cdf
             
             inc_val = inc_diag[i] or 0.0
-            if ultimate < inc_val:
+            if not allow_neg and ultimate < inc_val:
                 ultimate = inc_val
                 
             ibnr = ultimate - paid

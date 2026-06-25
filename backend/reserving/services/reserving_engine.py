@@ -56,9 +56,17 @@ class ReservingEngine:
 
         # Fallback to calculated LDFs from session if empty
         if not paid_ldfs_to_use and session.get('ldfs'):
-            paid_ldfs_to_use = session.get('ldfs')
+            raw_ldfs = session.get('ldfs')
+            if isinstance(raw_ldfs, list) and len(raw_ldfs) > 0 and isinstance(raw_ldfs[0], dict):
+                paid_ldfs_to_use = [float(x.get('volumeWeighted', 1.0) or 1.0) for x in raw_ldfs]
+            else:
+                paid_ldfs_to_use = raw_ldfs
         if not incurred_ldfs_to_use and session.get('incurred_ldfs'):
-            incurred_ldfs_to_use = session.get('incurred_ldfs')
+            raw_inc_ldfs = session.get('incurred_ldfs')
+            if isinstance(raw_inc_ldfs, list) and len(raw_inc_ldfs) > 0 and isinstance(raw_inc_ldfs[0], dict):
+                incurred_ldfs_to_use = [float(x.get('volumeWeighted', 1.0) or 1.0) for x in raw_inc_ldfs]
+            else:
+                incurred_ldfs_to_use = raw_inc_ldfs
 
         # Precompute suggested ELRs once to avoid redundant execution in thread pool
         mature_thresh = req.mature_cdf_threshold if req.mature_cdf_threshold is not None else 1.05
@@ -139,11 +147,28 @@ class ReservingEngine:
                 # Derive defaults or use config parameters
                 suggested_elr_pct = suggested_elr_incurred if source_val == "incurred" else suggested_elr_paid
                 
-                params = {}
+                legacy_comp = req.legacy_compatibility
+                if method_config and method_config.legacy_compatibility is not None:
+                    legacy_comp = method_config.legacy_compatibility
+                if legacy_comp is None:
+                    legacy_comp = True
+                    
+                allow_neg = req.allow_negative_ibnr
+                if method_config and method_config.allow_negative_ibnr is not None:
+                    allow_neg = method_config.allow_negative_ibnr
+                if allow_neg is None:
+                    allow_neg = False
+                
+                params = {
+                    'legacy_compatibility': legacy_comp,
+                    'allow_negative_ibnr': allow_neg
+                }
                 assumptions = {
                     "source": source_label,
                     "ldf_basis": ldf_basis_name,
-                    "tail_factor": float(tail_to_use)
+                    "tail_factor": float(tail_to_use),
+                    "allow_negative_ibnr": allow_neg,
+                    "legacy_compatibility": legacy_comp
                 }
 
                 if code == 'BF':
