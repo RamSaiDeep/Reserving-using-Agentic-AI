@@ -72,28 +72,48 @@ class MockApp:
     def __init__(self):
         pass
 
-# Call the endpoint handler directly
+# Call the endpoint handler directly (for PAID source)
 import asyncio
-res = asyncio.run(execute_all_models(req))
-assert res.get("success") == True, f"Failed execution: {res}"
+req_paid = copy.deepcopy(req)
+req_paid.data_source = "paid"
+res_paid = asyncio.run(execute_all_models(req_paid))
+assert res_paid.get("success") == True, f"Failed PAID execution: {res_paid}"
 
-methods = res.get("methods", [])
-print(f"Total methods executed: {len(methods)}")
-for m in methods:
+methods_paid = res_paid.get("methods", [])
+print(f"Total PAID methods executed: {len(methods_paid)}")
+for m in methods_paid:
     print(f" - Result ID: {m.get('result_id')} | Method: {m.get('method')} | Source: {m.get('source')} | Status: {m.get('status')}")
 
-# Assert result IDs are correctly formatted
-result_ids = [m.get("result_id") for m in methods]
-print("Executed Result IDs:", result_ids)
+result_ids_paid = [m.get("result_id") for m in methods_paid]
+print("Executed PAID Result IDs:", result_ids_paid)
 
-assert "CL_PAID" in result_ids, "CL Paid should have run"
-assert "CL_INCURRED" in result_ids, "CL Incurred should have run"
-assert "BF_PAID" in result_ids, "BF Paid should have run"
-assert "BF_INCURRED" not in result_ids, "BF Incurred should not have run"
-assert "CO" in result_ids, "Case Outstanding should have run as CO"
+assert "CL_PAID" in result_ids_paid, "CL Paid should have run"
+assert "BF_PAID" in result_ids_paid, "BF Paid should have run"
+assert "CO" in result_ids_paid, "Case Outstanding should have run as CO"
+
+# Call the endpoint handler directly (for INCURRED source)
+req_inc = copy.deepcopy(req)
+req_inc.data_source = "incurred"
+res_inc = asyncio.run(execute_all_models(req_inc))
+assert res_inc.get("success") == True, f"Failed INCURRED execution: {res_inc}"
+
+methods_inc = res_inc.get("methods", [])
+print(f"Total INCURRED methods executed: {len(methods_inc)}")
+for m in methods_inc:
+    print(f" - Result ID: {m.get('result_id')} | Method: {m.get('method')} | Source: {m.get('source')} | Status: {m.get('status')}")
+
+result_ids_inc = [m.get("result_id") for m in methods_inc]
+print("Executed INCURRED Result IDs:", result_ids_inc)
+
+assert "CL_INCURRED" in result_ids_inc, "CL Incurred should have run"
+assert "BF_INCURRED" in result_ids_inc, "BF Incurred should have run under Incurred source (even if disabled per-method BF config, wait, in config it is run_paid=True, run_incurred=False. Since run_incurred is false in config, BF Incurred should be disabled.)"
+# Let's verify BF is indeed disabled in Incurred run because run_incurred is False
+bf_res = next((m for m in methods_inc if m.get("result_id") == "BF_INCURRED"), None)
+assert bf_res is not None and bf_res.get("status") == "disabled", "BF Incurred should be disabled because run_incurred=False in config"
 
 # Assert standard reserving output contract (Version 2.0)
-for m in methods:
+all_methods = methods_paid + methods_inc
+for m in all_methods:
     if m.get("status") == "success":
         assert m.get("version") == "2.0", f"Expected version 2.0, got {m.get('version')}"
         assert m.get("valuation_date") == "1997-12-31", f"Expected valuation date 1997-12-31, got {m.get('valuation_date')}"

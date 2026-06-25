@@ -25,7 +25,8 @@ export const AVAILABLE_METHODS = [
   { code: 'BK', label: 'Benktander', desc: 'Iterative credibility method blending CL and BF.', needsPremium: true },
   { code: 'CC', label: 'Cape Cod', desc: 'Exposure-adjusted credibility method.', needsPremium: true },
   { code: 'ELR', label: 'Expected Loss Ratio', desc: 'Expected Claims Method utilizing an a priori ELR.', needsPremium: true },
-  { code: 'CLK', label: 'Clark Stochastic', desc: 'Continuous growth curve MLE projection.' }
+  { code: 'CLK', label: 'Clark Stochastic', desc: 'Continuous growth curve MLE projection.' },
+  { code: 'FS', label: 'Frequency-Severity Method', desc: 'Chapter 11 count and severity development.' }
 ];
 
 export const DIAGNOSTIC_METHODS = [
@@ -260,6 +261,36 @@ export default function ConfigureAssumptions({
                                 <span className="text-[10px] text-text-sub block">Heavier tail projection</span>
                               </div>
                             </label>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Frequency-Severity settings */}
+                      {method.code === 'FS' && (
+                        <div className="flex flex-col gap-3">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-xs font-bold text-text-sub">F/S Approach</label>
+                            <select
+                              value={config.approach || 'approach1'}
+                              onChange={(e) => handleParamChange(method.code, 'approach', e.target.value)}
+                              className="bg-bg-2 border border-border rounded px-3 py-1.5 text-xs outline-none focus:border-accent w-full mt-1 text-text-main"
+                            >
+                              <option value="approach1">Count/Severity Development (Approach 1)</option>
+                              <option value="approach2">Frequency Rate / Inflation Severity (Approach 2)</option>
+                              <option value="approach3">Disposal Rate / Incremental Severity (Approach 3)</option>
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-xs font-bold text-text-sub">Annual Inflation Rate (%)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0.0"
+                              max="20.0"
+                              value={config.inflationRate !== undefined ? config.inflationRate : 3.0}
+                              onChange={(e) => handleParamChange(method.code, 'inflationRate', parseFloat(e.target.value) || 0.0)}
+                              className="bg-bg-2 border border-border rounded px-3 py-1.5 text-xs outline-none focus:border-accent w-24 mt-1 font-mono text-text-main"
+                            />
                           </div>
                         </div>
                       )}

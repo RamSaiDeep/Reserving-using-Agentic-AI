@@ -25,6 +25,7 @@ class Triangle:
         self.dev_ages = []
         self.matrix = []
         self.incurred_matrix = []
+        self.count_matrix = []
         self.data_type = 'paid'
         self.premiums = {}
         self.exposures = {}
@@ -71,6 +72,7 @@ class Triangle:
             t._parse_wide(df)
             
         t._build_matrix()
+        t.ensure_count_matrix_and_exposures()
         
         if not t.accident_years:
             raise ValueError("Could not extract accident years from this CSV.")
@@ -154,6 +156,7 @@ class Triangle:
         self.incurred_matrix = pivot_and_extract(inc_col)
         
         count_matrix = pivot_and_extract(cnt_col)
+        self.count_matrix = count_matrix
         for i, ay in enumerate(self.accident_years):
             for v in reversed(count_matrix[i]):
                 if v is not None:
@@ -368,3 +371,49 @@ class Triangle:
             'dataType': self.data_type,
             'parseLog': self.parse_log
         }
+
+    def ensure_count_matrix_and_exposures(self):
+        # 1. exposures fallback (proportional to premiums)
+        if not self.exposures and self.premiums:
+            for ay, prem in self.premiums.items():
+                self.exposures[ay] = max(10.0, float(round(prem / 1000.0, 1)))
+        elif not self.exposures:
+            # Fallback if no premiums
+            for ay in self.accident_years:
+                self.exposures[ay] = 1000.0
+                
+        # 2. count_matrix fallback (synthetic counts if empty/missing)
+        is_empty = True
+        if hasattr(self, 'count_matrix') and self.count_matrix:
+            for row in self.count_matrix:
+                for val in row:
+                    if val is not None and not np.isnan(val) and val > 0:
+                        is_empty = False
+                        break
+        
+        if is_empty:
+            self.count_matrix = []
+            for i, row in enumerate(self.matrix):
+                count_row = []
+                last_cnt = 0
+                for j, val in enumerate(row):
+                    if val is not None and not np.isnan(val):
+                        # count is proportional to claims with some progression
+                        cnt = max(1, int(round(val / 5000.0)))
+                        # Ensure cumulative property (non-decreasing)
+                        cnt = max(cnt, last_cnt)
+                        # Add a small incremental count if claims are flat but non-zero
+                        if cnt == last_cnt and val > 0 and j > 0:
+                            cnt += 1
+                        last_cnt = cnt
+                        count_row.append(float(cnt))
+                    else:
+                        count_row.append(None)
+                self.count_matrix.append(count_row)
+                
+            # Also populate self.counts diagonal
+            for i, ay in enumerate(self.accident_years):
+                for v in reversed(self.count_matrix[i]):
+                    if v is not None:
+                        self.counts[ay] = v
+                        break

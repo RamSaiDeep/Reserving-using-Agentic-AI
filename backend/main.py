@@ -39,6 +39,8 @@ class MethodConfig(BaseModel):
     decay: Optional[float] = None
     matureYears: Optional[List[int]] = None
     curveType: Optional[str] = None
+    approach: Optional[str] = None
+    inflationRate: Optional[float] = None
 
 class ExecuteRequest(BaseModel):
     session_id: str
@@ -325,7 +327,8 @@ async def execute_model(req: ExecuteRequest):
             "CC":  "Cape Cod derives the ELR automatically from actual data: ELR = Σ(Reported Claims) / Σ(Used-Up Premium). Used-Up Premium = Earned Premium × % Reported (1/CDF). IBNR is then computed identically to BF.",
             "BK":  "Benktander iteratively refines the BF estimate: BF Ultimate is fed back as the new A Priori, and IBNR is recomputed. Each iteration shifts credibility from BF toward Chain Ladder proportional to % reported.",
             "CO":  "Case Outstanding method sets IBNR = total case reserves currently held by adjusters. It assumes zero future newly-reported claims. Reserve = Incurred − Paid = Case Reserves.",
-            "CLK": "Clark Stochastic fits a continuous growth curve (Log-Logistic or Weibull) to the paid triangle using maximum likelihood. Stabilised CDFs from the curve are applied to project ultimates with a distribution of outcomes."
+            "CLK": "Clark Stochastic fits a continuous growth curve (Log-Logistic or Weibull) to the paid triangle using maximum likelihood. Stabilised CDFs from the curve are applied to project ultimates with a distribution of outcomes.",
+            "FS":  "Frequency-Severity Method implements Chapter 11 techniques, projecting ultimate claims count and ultimate average severity separately (or using disposal and frequency rates) to compute reserves."
         }
 
         # ── Deterministic Report Generation (No Tokens Used) ──────────────────
@@ -605,6 +608,11 @@ async def execute_all_models(req: ExecuteRequest):
                 elif code == 'CLK':
                     params['curveType'] = method_config.curveType if method_config.curveType is not None else 'weibull'
                     assumptions['curveType'] = params['curveType']
+                elif code == 'FS':
+                    params['approach'] = method_config.approach if method_config.approach is not None else 'approach1'
+                    params['inflationRate'] = method_config.inflationRate if method_config.inflationRate is not None else 3.0
+                    assumptions['approach'] = params['approach']
+                    assumptions['inflationRate'] = float(params['inflationRate'])
 
                 # FIT model using EXPLICIT matrix argument (zero triangle.matrix swap/mutation!)
                 model.fit(t_eval, params, ldfs_for_run, matrix=matrix_to_use)
@@ -659,7 +667,12 @@ async def execute_all_models(req: ExecuteRequest):
                 continue
                 
             if MethodClass.supports_source_selection:
-                tasks_to_run.append((code, MethodClass, global_source, False))
+                is_disabled_for_source = False
+                if global_source == "paid" and method_config.run_paid is False:
+                    is_disabled_for_source = True
+                elif global_source == "incurred" and method_config.run_incurred is False:
+                    is_disabled_for_source = True
+                tasks_to_run.append((code, MethodClass, global_source, is_disabled_for_source))
             else:
                 tasks_to_run.append((code, MethodClass, "both", False))
 

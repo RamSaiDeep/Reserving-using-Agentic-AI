@@ -6,6 +6,7 @@ from .cape_cod import CapeCod
 from .case_outstanding import CaseOutstanding
 from .clark import Clark
 from .expected_loss_ratio import ExpectedLossRatio
+from .frequency_severity import FrequencySeverity
 
 METHODS = {
     'CL': ChainLadder,
@@ -15,5 +16,6 @@ METHODS = {
     'CC': CapeCod,
     'CO': CaseOutstanding,
     'CLK': Clark,
-    'ELR': ExpectedLossRatio
+    'ELR': ExpectedLossRatio,
+    'FS': FrequencySeverity
 }

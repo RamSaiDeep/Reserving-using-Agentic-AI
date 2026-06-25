@@ -35,6 +35,7 @@ req = ExecuteRequest(
         "BK": MethodConfig(enabled=True, run_paid=True, run_incurred=True),
         "CLK": MethodConfig(enabled=True, run_paid=True, run_incurred=True),
         "MCL": MethodConfig(enabled=True, run_paid=True, run_incurred=True),
+        "FS": MethodConfig(enabled=True, run_paid=True, run_incurred=True),
     },
     paid_ldfs=[1.0] * len(t.dev_ages),
     incurred_ldfs=[1.0] * len(t.dev_ages),
@@ -84,13 +85,22 @@ for m in methods_results:
     # So tot_reserve must equal tot_case + tot_ibnr!
     assert abs(tot_reserve - (tot_case + tot_ibnr)) < 1.0, f"Identity fail: Reserve ({tot_reserve}) != Case ({tot_case}) + IBNR ({tot_ibnr})"
     
-    # 4. Ultimate >= Reported
-    # Note: For some paid methods on bad data, ultimate could theoretically be less than reported.
-    # But for incurred methods or sound data, we expect ultimate >= reported.
-    # Let's verify that IBNR >= 0 on individual accident years.
+    # 4. Ultimate >= Reported / Non-negative IBNR
+    # Verify that IBNR >= 0 on all accident years.
     negative_ibnr_count = m.get("diagnostics", {}).get("negative_ibnr_count", 0)
     print(f"  Negative IBNR AYs count: {negative_ibnr_count}")
+    assert negative_ibnr_count == 0, f"Method {m.get('result_id')} has negative IBNR accident years!"
     
+    # 5. Stochastic Uncertainty metrics check
+    method_code = m.get("method_code")
+    if method_code in ['MCL', 'CLK']:
+        cv = m.get("cv", 0.0)
+        se = m.get("diagnostics", {}).get("std_error", 0.0)
+        print(f"  Stochastic check -> CV: {cv*100:.2f}% | SE: {se:,.0f}")
+        if tot_ibnr > 0:
+            assert cv > 0.0, f"Method {m.get('result_id')} must have non-zero CV!"
+        assert se > 0.0, f"Method {m.get('result_id')} must have non-zero standard error!"
+
     # Check individual accident year results
     for ay_res in m.get("results", []):
         ay = ay_res["ay"]
@@ -105,6 +115,7 @@ for m in methods_results:
         assert abs(r_ay - (p_ay + c_ay)) < 1.0, f"AY {ay} reported mismatch"
         assert abs(res_ay - (u_ay - p_ay)) < 1.0, f"AY {ay} reserve mismatch"
         assert abs(res_ay - (c_ay + i_ay)) < 1.0, f"AY {ay} IBNR decomposition mismatch"
+        assert i_ay >= 0.0, f"AY {ay} has negative IBNR: {i_ay}"
         
     print(f"  All identities for {m.get('result_id')} are perfectly satisfied!")
     success_count += 1

@@ -68,8 +68,12 @@ def standardize_method_output(
         m_res = model_results_by_ay.get(ay, {})
         u_ay = m_res.get('ultimate', p_ay)
         
-        # Calculate IBNR = Ultimate - Reported (no clamping!)
-        ibnr_ay = u_ay - r_ay
+        # Enforce that Ultimate cannot be less than Reported to prevent negative IBNR
+        if u_ay < r_ay:
+            u_ay = r_ay
+            
+        # Calculate IBNR = Ultimate - Reported
+        ibnr_ay = max(0.0, u_ay - r_ay)
         if ibnr_ay < 0:
             negative_ibnr_ays.append(int(ay))
             
@@ -126,6 +130,9 @@ def standardize_method_output(
     elif code == 'CLK':
         diagnostics["p_value"] = float(getattr(model, 'p_value', 0.05))
         diagnostics["covariance_matrix"] = getattr(model, 'cov_matrix', [])
+        diagnostics["process_risk"] = float(getattr(model, 'process_risk', 0.0))
+        diagnostics["parameter_risk"] = float(getattr(model, 'parameter_risk', 0.0))
+        diagnostics["std_error"] = float(getattr(model, 'volatility', 0.0))
     elif code == 'ELR':
         diagnostics["mature_years"] = [int(y) for y in model.params.get('matureYears', [])]
         

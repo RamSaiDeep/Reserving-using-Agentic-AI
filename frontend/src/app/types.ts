@@ -91,6 +91,8 @@ export interface MethodConfig {
   decay?: number;
   matureYears?: number[];
   curveType?: 'weibull' | 'loglogistic';
+  approach?: string;
+  inflationRate?: number;
 }
 
 export type ExecutionConfig = Record<string, MethodConfig>;

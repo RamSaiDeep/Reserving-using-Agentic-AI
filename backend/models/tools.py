@@ -51,6 +51,12 @@ SENSITIVITY_TABLE = {
         "increasing_claim_ratios":     {"impact": "NONE",     "explanation": "Directly responsive — higher claim activity immediately raises case reserves, which flows straight through to the Case Outstanding estimate."},
         "case_outstanding_strengthening": {"impact": "SEVERE","explanation": "Critically sensitive. The entire reserve estimate equals the case reserves. If adjusters strengthen reserves artificially, this method will overstate IBNR by exactly that amount with no dampening mechanism."},
         "changing_settlement_rates":   {"impact": "SLIGHT",   "explanation": "Faster settlements reduce open case counts and thus case reserves, directly lowering the IBNR estimate. This is broadly appropriate behavior unless large claims are disproportionately affected."}
+    },
+    "FS": {
+        "changing_product_mix":        {"impact": "MODERATE", "explanation": "Mix changes affect count and severity trends differently, making independent development less reliable."},
+        "increasing_claim_ratios":     {"impact": "NONE",     "explanation": "Highly responsive if claim count and severity triangles are updated with current data."},
+        "case_outstanding_strengthening": {"impact": "NONE",  "explanation": "Paid-based Frequency-Severity methods are completely unaffected by case outstanding changes."},
+        "changing_settlement_rates":   {"impact": "MODERATE", "explanation": "Settlement rate changes distort both count development factors and incremental paid severities."}
     }
 }
 
@@ -67,12 +73,31 @@ def compute_ibnr_table(triangle, model, custom_ldfs: list) -> list:
     cdfs = triangle.compute_cdfs(custom_ldfs)
     model_results = model.get_results() if hasattr(model, 'get_results') else []
 
+    # Get incurred diagonal as well
+    inc_diag = []
+    if hasattr(triangle, 'incurred_matrix') and triangle.incurred_matrix:
+        for row in triangle.incurred_matrix:
+            val = next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0.0)
+            inc_diag.append(val)
+    else:
+        inc_diag = list(diag)
+
     for i, ay in enumerate(triangle.accident_years):
         paid = diag[i] if i < len(diag) else None
         # Use model result if available
         mr = next((r for r in model_results if str(r.get('ay')) == str(ay)), None)
         ultimate = mr['ultimate'] if mr else (round(paid * cdfs[i], 0) if paid and i < len(cdfs) else None)
-        ibnr = round(ultimate - paid, 0) if ultimate is not None and paid is not None else None
+        
+        inc = inc_diag[i] if i < len(inc_diag) else paid
+        # Clamp ultimate to be at least incurred (to prevent negative IBNR)
+        if ultimate is not None and inc is not None and ultimate < inc:
+            ultimate = inc
+            
+        # IBNR is ultimate - incurred
+        ibnr = round(ultimate - inc, 0) if ultimate is not None and inc is not None else None
+        if ibnr is not None:
+            ibnr = max(0.0, ibnr)
+            
         results.append({
             'accident_year': ay,
             'paid': round(paid, 0) if paid else None,

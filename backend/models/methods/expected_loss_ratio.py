@@ -22,6 +22,15 @@ class ExpectedLossRatio(MethodBase):
         dev_idx = [next((i for i, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
         elr = float(self.params.get('aprioriLossRatio', 65)) / 100.0
         
+        # Get incurred diagonal to clamp ultimate and prevent negative IBNR
+        inc_diag = []
+        if hasattr(self.triangle, 'incurred_matrix') and self.triangle.incurred_matrix:
+            for row in self.triangle.incurred_matrix:
+                val = next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0.0)
+                inc_diag.append(val)
+        else:
+            inc_diag = list(diag)
+
         for i, ay in enumerate(ays):
             paid = diag[i] or 0
             idx = dev_idx[i]
@@ -29,6 +38,12 @@ class ExpectedLossRatio(MethodBase):
             prem = self.triangle.premiums.get(ay, 0)
             
             ultimate = prem * elr
+            
+            # Clamp ultimate to incurred claims
+            inc_val = inc_diag[i] or 0
+            if ultimate < inc_val:
+                ultimate = inc_val
+                
             ibnr = ultimate - paid
             pct_rep = (1.0 / cdf * 100) if cdf > 0 else 100
             

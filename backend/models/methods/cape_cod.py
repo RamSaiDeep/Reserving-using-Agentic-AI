@@ -49,6 +49,15 @@ class CapeCod(MethodBase):
         # Step 4: Recalculate ultimate with adjusted LR
         expected_ultimate = adjusted_expected_lr * earned_premium
         
+        # Get incurred diagonal to clamp ultimate and prevent negative IBNR
+        inc_diag = []
+        if hasattr(self.triangle, 'incurred_matrix') and self.triangle.incurred_matrix:
+            for row in self.triangle.incurred_matrix:
+                val = next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0.0)
+                inc_diag.append(val)
+        else:
+            inc_diag = list(diag)
+
         for i, ay in enumerate(ays):
             claims_val = diag[i] or 0
             idx = dev_idx[i]
@@ -56,6 +65,12 @@ class CapeCod(MethodBase):
             prem = earned_premium[i]
             
             ultimate = expected_ultimate[i]
+            
+            # Clamp ultimate to incurred claims
+            inc_val = inc_diag[i] or 0
+            if ultimate < inc_val:
+                ultimate = inc_val
+                
             ibnr = ultimate - claims_val
             pct_rep = (1.0 / cdf * 100) if cdf > 0 else 100
             

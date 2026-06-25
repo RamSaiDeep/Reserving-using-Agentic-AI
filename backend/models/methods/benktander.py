@@ -30,6 +30,15 @@ class Benktander(MethodBase):
         elr = float(self.params.get('aprioriLossRatio', 65)) / 100.0
         iters = int(self.params.get('iterations', 1))
         
+        # Get incurred diagonal to clamp ultimate and prevent negative IBNR
+        inc_diag = []
+        if hasattr(self.triangle, 'incurred_matrix') and self.triangle.incurred_matrix:
+            for row in self.triangle.incurred_matrix:
+                val = next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0.0)
+                inc_diag.append(val)
+        else:
+            inc_diag = list(diag)
+
         for i, ay in enumerate(ays):
             claims_val = diag[i] or 0
             idx = dev_idx[i]
@@ -41,6 +50,12 @@ class Benktander(MethodBase):
             
             expected_ultimate = elr * prem
             ultimate = (percent_unreported * expected_ultimate) + (percent_reported * claims_val)
+            
+            # Clamp ultimate to incurred claims
+            inc_val = inc_diag[i] or 0
+            if ultimate < inc_val:
+                ultimate = inc_val
+                
             ibnr = ultimate - claims_val
             
             self.results.append({
