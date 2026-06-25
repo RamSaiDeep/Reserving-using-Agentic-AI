@@ -92,4 +92,37 @@ assert "BF_PAID" in result_ids, "BF Paid should have run"
 assert "BF_INCURRED" not in result_ids, "BF Incurred should not have run"
 assert "CO" in result_ids, "Case Outstanding should have run as CO"
 
+# Assert standard reserving output contract (Version 2.0)
+for m in methods:
+    if m.get("status") == "success":
+        assert m.get("version") == "2.0", f"Expected version 2.0, got {m.get('version')}"
+        assert m.get("valuation_date") == "1997-12-31", f"Expected valuation date 1997-12-31, got {m.get('valuation_date')}"
+        assert m.get("source_basis") in ["paid", "incurred", "both"], f"Invalid source_basis: {m.get('source_basis')}"
+        assert isinstance(m.get("paid"), float), "paid should be float"
+        assert isinstance(m.get("case_outstanding"), float), "case_outstanding should be float"
+        assert isinstance(m.get("reported"), float), "reported should be float"
+        assert isinstance(m.get("ultimate"), float), "ultimate should be float"
+        assert isinstance(m.get("ibnr"), float), "ibnr should be float"
+        assert isinstance(m.get("reserve"), float), "reserve should be float"
+        assert isinstance(m.get("future_paid"), float), "future_paid should be float"
+        assert m.get("future_paid") == m.get("reserve"), "future_paid should equal reserve"
+        assert isinstance(m.get("paid_maturity"), float), "paid_maturity should be float"
+        assert isinstance(m.get("reported_maturity"), float), "reported_maturity should be float"
+        assert isinstance(m.get("ultimate_by_ay"), dict), "ultimate_by_ay should be dict"
+        assert isinstance(m.get("ibnr_by_ay"), dict), "ibnr_by_ay should be dict"
+        assert isinstance(m.get("reserve_by_ay"), dict), "reserve_by_ay should be dict"
+        
+        # Data Quality Flags
+        dq = m.get("data_quality", {})
+        assert "has_negative_ibnr" in dq, "data_quality should have has_negative_ibnr"
+        assert "has_missing_premium" in dq, "data_quality should have has_missing_premium"
+        assert "has_sparse_triangle" in dq, "data_quality should have has_sparse_triangle"
+        assert "missing_incurred_data" in dq, "data_quality should have missing_incurred_data"
+        
+        # Diagnostics
+        diag = m.get("diagnostics", {})
+        assert "negative_ibnr_ays" in diag, "diagnostics should have negative_ibnr_ays"
+        assert "negative_ibnr_count" in diag, "diagnostics should have negative_ibnr_count"
+        assert "reported_fallback_used" in diag, "diagnostics should have reported_fallback_used"
+
 print("Capabilities execution: SUCCESS!")

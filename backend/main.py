@@ -364,17 +364,28 @@ async def execute_model(req: ExecuteRequest):
         final_msg = json.dumps(parsed)
         session['report'] = final_msg
 
-        # ── Store results ─────────────────────────────────────────────────────
+        # ── Store results & Standardize ───────────────────────────────────────
         cdfs_curve = t_eval.compute_cdfs(req.custom_ldfs)
-        session['results'] = model.get_results()
-        session['total_ultimate'] = model.get_total_ultimate()
-        session['total_ibnr'] = model.get_total_ibnr()
+        
+        from models.standardizer import standardize_method_output
+        std_out = standardize_method_output(
+            code=req.method_code,
+            label=MethodClass.label,
+            source_val=data_source,
+            t_eval=t_eval,
+            model=model,
+            configs={req.method_code: req}
+        )
+
+        session['results'] = std_out['results']
+        session['total_ultimate'] = std_out['ultimate']
+        session['total_ibnr'] = std_out['ibnr']
         session['volatility'] = getattr(model, 'volatility', None)
         session['cdfs']      = cdfs_curve
         session['ldfs']      = req.custom_ldfs
         session['dev_ages']  = t_eval.dev_ages
-        session['totalIBNR'] = model.get_total_ibnr()
-        session['totalUlt']  = model.get_total_ultimate()
+        session['totalIBNR'] = std_out['ibnr']
+        session['totalUlt']  = std_out['ultimate']
         
         # Store diagnostics for Analysis Agent
         session['loss_ratios'] = loss_ratios
@@ -386,10 +397,10 @@ async def execute_model(req: ExecuteRequest):
 
         return {
             "success":   True,
-            "results":   session['results'],
-            "totalIBNR": session['totalIBNR'],
-            "totalUlt":  session['totalUlt'],
-            "totalPaid": total_paid,
+            "results":   std_out['results'],
+            "totalIBNR": std_out['ibnr'],
+            "totalUlt":  std_out['ultimate'],
+            "totalPaid": std_out['paid'],
             "narration": final_msg,
             "cdfs":      cdfs_curve,
             "ldfs":      req.custom_ldfs,
@@ -397,7 +408,8 @@ async def execute_model(req: ExecuteRequest):
             "loss_ratios":   loss_ratios,
             "suggested_elr": elr_suggestion,
             "ldf_stability": ldf_stability,
-            "volatility":    session.get('volatility', 0)
+            "volatility":    session.get('volatility', 0),
+            **std_out
         }
     except Exception as e:
         import traceback
@@ -600,64 +612,16 @@ async def execute_all_models(req: ExecuteRequest):
                 # FIT model using EXPLICIT matrix argument (zero triangle.matrix swap/mutation!)
                 model.fit(t_eval, params, ldfs_for_run, matrix=matrix_to_use)
                 
-                results = model.get_results()
-                total_ibnr = model.get_total_ibnr()
-                total_ultimate = model.get_total_ultimate()
-                
-                # Calculate metrics:
-                # 1. Loss Ratio
-                total_premium = sum(t_eval.premiums.values()) if t_eval.premiums else 0
-                loss_ratio = total_ultimate / total_premium if total_premium > 0 else 0.0
-                
-                # 2. Maturity Score
-                cdfs = model.cdfs
-                dev_idx = [next((idx for idx, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in matrix_to_use]
-                maturity_scores = []
-                for idx in dev_idx:
-                    cdf = cdfs[idx] if idx < len(cdfs) else 1.0
-                    maturity_scores.append(1.0 / cdf if cdf > 0 else 1.0)
-                maturity_score = sum(maturity_scores) / len(maturity_scores) if maturity_scores else 0.0
-                
-                # 3. Reserve-to-Case Ratio
-                tot_inc = 0
-                tot_paid = 0
-                for i in range(len(t_eval.accident_years)):
-                    inc_row = t_eval.incurred_matrix[i] if t_eval.incurred_matrix else []
-                    paid_row = t_eval.matrix[i]
-                    last_inc = next((v for v in reversed(inc_row) if v is not None and not np.isnan(v)), None)
-                    last_paid = next((v for v in reversed(paid_row) if v is not None and not np.isnan(v)), None)
-                    if last_inc is not None: tot_inc += last_inc
-                    if last_paid is not None: tot_paid += last_paid
-                case_outstanding = tot_inc - tot_paid
-                reserve_to_case_ratio = total_ibnr / case_outstanding if case_outstanding > 0 else 0.0
-                
-                # 4. CV
-                cv = 0.0
-                if code == 'MCL' and hasattr(model, 'volatility') and total_ibnr > 0:
-                    cv = getattr(model, 'volatility', 0.0) / total_ibnr
-                elif code == 'CLK' and hasattr(model, 'volatility') and total_ibnr > 0:
-                    cv = getattr(model, 'volatility', 0.0) / total_ibnr
-                    
-                return {
-                    "result_id": result_id,
-                    "method": MethodClass.label,
-                    "source": source_label,
-                    "ultimate": float(total_ultimate),
-                    "ibnr": float(total_ibnr),
-                    "status": "success",
-                    "reason": None,
-                    "assumptions": assumptions,
-                    "results": results,
-                    "error": None,
-                    
-                    # Backward compatibility fields
-                    "code": result_id,
-                    "name": name_label,
-                    "loss_ratio": float(loss_ratio),
-                    "cv": float(cv),
-                    "reserve_to_case_ratio": float(reserve_to_case_ratio),
-                    "maturity_score": float(maturity_score)
-                }
+                from models.standardizer import standardize_method_output
+                std_out = standardize_method_output(
+                    code=code,
+                    label=MethodClass.label,
+                    source_val=source_val,
+                    t_eval=t_eval_base,
+                    model=model,
+                    configs=configs
+                )
+                return std_out
             except Exception as e:
                 if source_val == "both":
                     result_id = code
