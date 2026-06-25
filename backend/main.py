@@ -25,6 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+def read_root():
+    return {"status": "healthy", "message": "Agentic Actuarial Reserving Backend is running"}
+
 class MethodConfig(BaseModel):
     enabled: bool
     run_paid: Optional[bool] = True
