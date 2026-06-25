@@ -70,7 +70,7 @@ def compute_ibnr_table(triangle, model, custom_ldfs: list) -> list:
     for i, ay in enumerate(triangle.accident_years):
         paid = diag[i] if i < len(diag) else None
         # Use model result if available
-        mr = next((r for r in model_results if str(r.get('accident_year')) == str(ay)), None)
+        mr = next((r for r in model_results if str(r.get('ay')) == str(ay)), None)
         ultimate = mr['ultimate'] if mr else (round(paid * cdfs[i], 0) if paid and i < len(cdfs) else None)
         ibnr = round(ultimate - paid, 0) if ultimate is not None and paid is not None else None
         results.append({
@@ -80,6 +80,7 @@ def compute_ibnr_table(triangle, model, custom_ldfs: list) -> list:
             'ibnr': ibnr
         })
     return results
+
 
 
 def compute_loss_ratios(triangle, model_results: list) -> list:

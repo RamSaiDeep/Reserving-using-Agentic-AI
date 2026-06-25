@@ -56,8 +56,42 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
 
   const activeMethods = useMemo(() => {
     if (!data.methods) return [];
-    return data.methods.filter(m => m.status === 'success') as MethodResultItem[];
+    return data.methods.filter(m => m.status === 'success' && (m.result_id || m.code) !== 'CO') as MethodResultItem[];
   }, [data.methods]);
+
+  const reservingMethods = useMemo(() => {
+    if (!data.methods) return [];
+    return data.methods.filter(m => (m.result_id || m.code) !== 'CO');
+  }, [data.methods]);
+
+  const caseOutstandingDetail = useMemo(() => {
+    if (!data.methods) return undefined;
+    return data.methods.find(m => (m.result_id || m.code) === 'CO' && m.status === 'success');
+  }, [data.methods]);
+
+  const coDiagnostic = useMemo(() => {
+    if (!caseOutstandingDetail || !caseOutstandingDetail.results) return null;
+    
+    const results = caseOutstandingDetail.results;
+    if (results.length === 0) return null;
+    
+    // Calculate average Case CDF for immature accident years (where CDF is not 1.0)
+    const immatureResults = results.filter(r => r.cdfToUlt > 1.0);
+    const resultsToUse = immatureResults.length > 0 ? immatureResults : results;
+    const avgCaseCdf = resultsToUse.reduce((acc, r) => acc + (r.cdfToUlt || 1.0), 0) / resultsToUse.length;
+    
+    const assessment = avgCaseCdf < 1.10 ? "STRONG" : "WEAK";
+    const recommendation = assessment === "STRONG"
+      ? "Case reserves are highly stable (average Case CDF is close to 1.0). Incurred-based methods (CL Incurred, BF, CC) are recommended as they incorporate adjuster case estimates without risk of significant development distortions."
+      : "Case reserves show significant potential for future development (average Case CDF is elevated). Paid-based methods (CL Paid, Clark) or Bornhuetter-Ferguson with Paid LDFs are recommended to bypass case reserve instability.";
+      
+    return {
+      avgCaseCdf,
+      assessment,
+      recommendation,
+      results
+    };
+  }, [caseOutstandingDetail]);
 
   // Median, Min, Max Ultimate
   const ultimateStats = useMemo(() => {
@@ -166,6 +200,45 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
         </div>
       )}
 
+      {/* Case Outstanding Diagnostic Panel */}
+      {coDiagnostic && (
+        <div className="p-5 bg-blue-500/5 border border-blue-500/20 rounded-xl shadow-sm space-y-3 text-left">
+          <div className="flex items-center justify-between border-b border-border pb-2.5">
+            <h3 className="text-sm font-bold text-text-main flex items-center gap-2">
+              🔎 Case Outstanding Diagnostic Analysis
+            </h3>
+            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+              coDiagnostic.assessment === 'STRONG'
+                ? 'bg-accent-green/10 border-accent-green/30 text-accent-green'
+                : 'bg-accent-amber/10 border-accent-amber/30 text-accent-amber'
+            }`}>
+              {coDiagnostic.assessment} Case Reserves
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="md:col-span-2 space-y-1">
+              <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
+                Reserving Adequacy Assessment
+              </span>
+              <p className="text-xs text-text-sub leading-relaxed">
+                {coDiagnostic.recommendation}
+              </p>
+            </div>
+            <div className="bg-bg-2 border border-border-2 rounded-lg p-3.5 flex flex-col items-center justify-center text-center font-mono">
+              <span className="text-[9px] font-bold text-text-muted uppercase tracking-wider mb-1">
+                Average Case CDF
+              </span>
+              <span className="text-lg font-bold text-accent">
+                {coDiagnostic.avgCaseCdf.toFixed(3)}
+              </span>
+              <span className="text-[8px] text-text-sub mt-0.5">
+                (Ratio of Paid vs. Incurred LDF)
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 2. Method Comparison Summary Table */}
       <div className="space-y-3">
         <h3 className="text-xs font-bold text-text-main uppercase tracking-wider">Method Comparison Summary</h3>
@@ -186,7 +259,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
               </tr>
             </thead>
             <tbody>
-              {data.methods?.map((m, idx) => {
+              {reservingMethods.map((m, idx) => {
                 const isSuccess = m.status === 'success';
                 const isRecommended = m.result_id === data.ai_recommendation?.recommended_method || m.code === data.ai_recommendation?.recommended_method;
                 

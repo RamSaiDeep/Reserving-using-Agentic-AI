@@ -42,14 +42,14 @@ export default function Page() {
   const [executeResult, setExecuteResult] = useState<ExecuteResult | null>(null);
   const [currency, setCurrency] = useState<CurrencyCode>('USD');
   const [configs, setConfigs] = useState<ExecutionConfig>({
-    CL: { enabled: true, runPaid: true, runIncurred: true },
-    MCL: { enabled: true, runPaid: true, runIncurred: true },
-    BF: { enabled: true, runPaid: true, runIncurred: false, aprioriLossRatio: null },
-    BK: { enabled: true, runPaid: true, runIncurred: false, aprioriLossRatio: null, iterations: 2 },
-    CC: { enabled: true, runPaid: true, runIncurred: false, decay: 0.9 },
-    ELR: { enabled: true, runPaid: true, runIncurred: false, matureYears: [] },
-    CLK: { enabled: true, runPaid: true, runIncurred: false, curveType: 'weibull' },
-    CO: { enabled: true, runPaid: true, runIncurred: true }
+    CL: { enabled: true },
+    MCL: { enabled: true },
+    BF: { enabled: true, aprioriLossRatio: null },
+    BK: { enabled: true, aprioriLossRatio: null, iterations: 2 },
+    CC: { enabled: true, decay: 1.0 },
+    ELR: { enabled: true, aprioriLossRatio: null },
+    CLK: { enabled: true, curveType: 'weibull' },
+    CO: { enabled: true }
   });
   const [suggestedElrPaid, setSuggestedElrPaid] = useState<number | null>(65.0);
   const [suggestedElrIncurred, setSuggestedElrIncurred] = useState<number | null>(65.0);
@@ -82,7 +82,7 @@ export default function Page() {
     }
   }, []);
 
-  // Synchronize suggestions and prefill configs when triangle changes
+  // Synchronize suggestions and prefill configs when triangle or dataSource changes
   useEffect(() => {
     if (triangle) {
       const elrPaid = triangle.suggested_elr_paid !== undefined ? triangle.suggested_elr_paid : 65.0;
@@ -97,7 +97,7 @@ export default function Page() {
         
         const codes = Object.keys(nextConfigs);
         for (const code of codes) {
-          const methodConfig = { ...(nextConfigs[code] || { enabled: true, runPaid: true, runIncurred: false }) };
+          const methodConfig = { ...(nextConfigs[code] || { enabled: true }) };
           
           if (triangle.method_availability && triangle.method_availability[code]) {
             methodConfig.enabled = triangle.method_availability[code].available;
@@ -105,17 +105,11 @@ export default function Page() {
             methodConfig.enabled = triangle.hasPremium;
           }
  
-          if (code === 'BF' || code === 'BK') {
-            const appropriateElr = methodConfig.runPaid ? elrPaid : elrInc;
+          if (code === 'BF' || code === 'BK' || code === 'ELR') {
+            const appropriateElr = dataSource === 'paid' ? elrPaid : elrInc;
             methodConfig.aprioriLossRatio = methodConfig.aprioriLossRatio !== null && methodConfig.aprioriLossRatio !== undefined
               ? methodConfig.aprioriLossRatio 
               : appropriateElr;
-          }
- 
-          if (code === 'ELR') {
-            methodConfig.matureYears = methodConfig.matureYears && methodConfig.matureYears.length > 0
-              ? methodConfig.matureYears
-              : (triangle.suggested_mature_years || []);
           }
  
           nextConfigs[code] = methodConfig;
@@ -124,7 +118,7 @@ export default function Page() {
         return nextConfigs;
       });
     }
-  }, [triangle]);
+  }, [triangle, dataSource]);
 
   // Recalculate suggestions when mature CDF threshold changes
   useEffect(() => {
@@ -143,19 +137,6 @@ export default function Page() {
             setSuggestedElrPaid(data.suggested_elr_paid);
             setSuggestedElrIncurred(data.suggested_elr_incurred);
             setSuggestedMatureYears(data.suggested_mature_years);
-            setConfigs((prev) => {
-              const elrCfg = prev.ELR;
-              if (elrCfg) {
-                return {
-                  ...prev,
-                  ELR: {
-                    ...elrCfg,
-                    matureYears: data.suggested_mature_years,
-                  },
-                };
-              }
-              return prev;
-            });
           }
         })
         .catch((err) => console.error('Failed to recalculate suggestions:', err));
@@ -357,13 +338,10 @@ export default function Page() {
       {
         code: 'ELR',
         label: 'Expected Loss Ratio',
-        desc: 'Projects mature historical loss ratios onto immature years.',
+        desc: 'Expected Claims Method using a user-specified a priori loss ratio.',
         score: 8.5,
         recommended: false,
-        params: [
-          { key: 'nMatureYears', label: 'Mature Years (n)', default: 5 },
-          { key: 'lrCap', label: 'Loss Ratio Cap', default: 5.0 },
-        ],
+        params: [{ key: 'aprioriLossRatio', label: 'A Priori Loss Ratio (%)', default: 65 }],
       },
       {
         code: 'CC',
@@ -432,6 +410,7 @@ export default function Page() {
     const payload = {
       session_id: sessionId,
       configs: configs,
+      data_source: dataSource,
       paid_ldfs: [...ldfsToUse, tailFactor],
       incurred_ldfs: [...incurredLdfsToUse, incurredTailFactor],
       paid_tail_factor: tailFactor,
@@ -618,11 +597,10 @@ export default function Page() {
             configs={configs}
             onChangeConfigs={setConfigs}
             triangle={triangle}
+            dataSource={dataSource}
+            onChangeDataSource={setDataSource}
             suggestedElrPaid={suggestedElrPaid}
             suggestedElrIncurred={suggestedElrIncurred}
-            suggestedMatureYears={suggestedMatureYears}
-            matureCdfThreshold={matureCdfThreshold}
-            onChangeMatureCdfThreshold={setMatureCdfThreshold}
             paidLdfBase={ldfBase}
             incurredLdfBase={incurredLdfBase}
             paidTailFactor={tailFactor}

@@ -593,18 +593,12 @@ async def execute_all_models(req: ExecuteRequest):
                     assumptions['aprioriLossRatio'] = float(val) / 100.0
                     assumptions['iterations'] = int(params['iterations'])
                 elif code == 'CC':
-                    params['decay'] = method_config.decay if method_config.decay is not None else 0.9
+                    params['decay'] = method_config.decay if method_config.decay is not None else 1.0
                     assumptions['decay'] = float(params['decay'])
                 elif code == 'ELR':
-                    if method_config.matureYears:
-                        params['matureYears'] = method_config.matureYears
-                        assumptions['matureYears'] = method_config.matureYears
-                    else:
-                        m_info = compute_mature_accident_years(t_eval_base, mature_thresh)
-                        params['matureYears'] = m_info["mature_years"]
-                        assumptions['matureYears'] = m_info["mature_years"]
-                    params['lrCap'] = 5.0
-                    assumptions['lrCap'] = 5.0
+                    val = method_config.aprioriLossRatio if method_config.aprioriLossRatio is not None else suggested_elr_pct
+                    params['aprioriLossRatio'] = val
+                    assumptions['apriori_loss_ratio'] = float(val) / 100.0
                 elif code == 'CLK':
                     params['curveType'] = method_config.curveType if method_config.curveType is not None else 'weibull'
                     assumptions['curveType'] = params['curveType']
@@ -647,6 +641,7 @@ async def execute_all_models(req: ExecuteRequest):
                 }
 
         # Build execution tasks list
+        global_source = req.data_source or "paid"
         tasks_to_run = []
         for code, MethodClass in METHODS.items():
             method_config = configs.get(code)
@@ -655,21 +650,13 @@ async def execute_all_models(req: ExecuteRequest):
                 
             if not method_config.enabled:
                 if MethodClass.supports_source_selection:
-                    if method_config.run_paid:
-                        tasks_to_run.append((code, MethodClass, "paid", True))
-                    if method_config.run_incurred:
-                        tasks_to_run.append((code, MethodClass, "incurred", True))
-                    if not method_config.run_paid and not method_config.run_incurred:
-                        tasks_to_run.append((code, MethodClass, "paid", True))
+                    tasks_to_run.append((code, MethodClass, global_source, True))
                 else:
                     tasks_to_run.append((code, MethodClass, "both", True))
                 continue
                 
             if MethodClass.supports_source_selection:
-                if method_config.run_paid:
-                    tasks_to_run.append((code, MethodClass, "paid", False))
-                if method_config.run_incurred:
-                    tasks_to_run.append((code, MethodClass, "incurred", False))
+                tasks_to_run.append((code, MethodClass, global_source, False))
             else:
                 tasks_to_run.append((code, MethodClass, "both", False))
 

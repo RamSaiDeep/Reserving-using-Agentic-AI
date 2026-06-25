@@ -20,9 +20,9 @@ class CapeCod(MethodBase):
         ays = self.triangle.accident_years
         diag = [next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
         dev_idx = [next((i for i, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
-        decay = float(self.params.get('decay', 0.9))
+        decay = float(self.params.get('decay', 1.0))
         trend_rate = float(self.params.get('trend_rate', 0.0)) / 100.0
-        use_latest_premium = bool(self.params.get('use_latest_premium', True))
+        use_latest_premium = bool(self.params.get('use_latest_premium', False))
         
         latest_ay = ays[-1] if ays else 2000
         latest_prem = self.triangle.premiums.get(latest_ay, 0)
