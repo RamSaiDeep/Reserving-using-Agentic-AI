@@ -328,4 +328,3 @@ def compute_method_availability(triangle) -> dict:
             "reason": None if has_premium else "Missing Earned Premium"
         }
     return availability
-

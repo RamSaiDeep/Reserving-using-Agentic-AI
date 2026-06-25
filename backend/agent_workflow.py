@@ -7,10 +7,14 @@ import concurrent.futures
 from openai import OpenAI
 import openai
 import os
-from models.triangle import Triangle
+from reserving.core.triangle import Triangle
 from reserving.methods import METHODS
 from reserving.ingestion.classifier import DataClassifier
 from reserving.ingestion.inspector import DataInspector
+
+# Import Multi-Agent Supervisor
+from agents.supervisor import SupervisorAgent
+from agents.utils import run_agent as utils_run_agent
 
 # Global Session Store
 SESSION_STORE = {}
@@ -75,8 +79,8 @@ def ingest_csv(session_id: str) -> str:
             entity_msg = f" Note: Detected {inspection.entity_check.entity_count} entities under '{inspection.entity_check.entity_column}'."
             
         return (f"Successfully parsed CSV ({len(df)} rows, {len(df.columns)} cols). "
-                f"Classified as '{classification.data_type}' (Confidence: {classification.confidence})."
-                f"{entity_msg} Mapped reserving roles: {roles_str}.")
+            f"Classified as '{classification.data_type}' (Confidence: {classification.confidence})."
+            f"{entity_msg} Mapped reserving roles: {roles_str}.")
     except Exception as e:
         return f"Failed to parse CSV: {str(e)}"
 
@@ -185,9 +189,6 @@ def calculate_ldfs(session_id: str) -> str:
         inc_ldfs = t.compute_incurred_ldfs()
         session['incurred_ldfs'] = inc_ldfs
         
-        n = session.get('n_years', 5)
-        # Assuming we just log the n-year request, exact usage in app.js uses the 'weighted5yr' or 'straightAvg' keys.
-        # We will inform the agent it was calculated.
         return f"Successfully calculated LDFs (Volume Weighted and n-year averages). Tail factor is {ldfs[-1]['volumeWeighted']}."
     except Exception as e:
         return f"Failed to calculate LDFs: {str(e)}"
@@ -223,7 +224,6 @@ def run_actuarial_model(session_id: str, method_code: str) -> str:
         ldfs_to_use = [f['volumeWeighted'] for f in session['ldfs'][:-1]] + [1.0]
         
         model = MethodClass()
-        model = MethodClass()
         params = session.get('params', {})
         model.fit(t, params, ldfs_to_use)
         
@@ -239,132 +239,7 @@ def run_actuarial_model(session_id: str, method_code: str) -> str:
     except Exception as e:
         return f"Failed to run model {method_code}: {str(e)}"
 
-
-# ==========================================
-# AGENT RUNNER UTILITY
-# ==========================================
-
-def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, prompt: str, tools: list) -> str:
-    env_api_key = os.environ.get("LLM_API_KEY")
-    env_base_url = os.environ.get("LLM_BASE_URL")
-    env_model_name = os.environ.get("LLM_MODEL_NAME")
-
-    # Fallbacks (UI > Environment)
-    api_key = api_key or env_api_key
-    base_url = base_url or env_base_url
-    model_name = model_name or env_model_name
-
-    if not api_key or not model_name:
-        return "Agent Error: AI settings are missing or incomplete. Please enter your LLM API Key and Model Name in the Settings panel."
-
-    # Determine if using a local/free endpoint (where fast timeouts are preferred)
-    is_local_or_free = (api_key == "ollama") or (base_url and ("localhost" in base_url or "127.0.0.1" in base_url or "ngrok-free.dev" in base_url))
-    
-    # Auto-correct Gemini native URL to OpenAI compatible URL
-    if base_url and "generativelanguage.googleapis.com" in base_url:
-        base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
-        
-    try:
-        client = OpenAI(
-            api_key=api_key, 
-            base_url=base_url if base_url else None,
-            default_headers={"ngrok-skip-browser-warning": "true"}
-        )
-    except Exception as e:
-        return f"Agent Error: {str(e)}"
-    
-    # Speed Optimization: Local/free settings should fail fast to avoid blocking actuarial workbench
-    timeout_val = 3.0 if is_local_or_free else 10.0
-    max_attempts = 1 if is_local_or_free else 2
-
-    # Simple retry mechanism
-    for attempt in range(max_attempts):
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": sys_inst},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                timeout=timeout_val
-            )
-            return response.choices[0].message.content
-        except openai.AuthenticationError:
-            return "Agent Error: Authentication failed. Please verify your Render Environment Variables."
-        except openai.RateLimitError:
-            if attempt == max_attempts - 1:
-                return "Agent Error: Quota/Rate limit exceeded (429). Please wait 60 seconds and try again."
-            time.sleep(1)
-        except openai.APIConnectionError:
-            if attempt == max_attempts - 1:
-                return "Agent Error: The LLM server is unreachable (API Connection Error)."
-        except Exception as e:
-            if attempt == max_attempts - 1:
-                return f"Agent Error: {str(e)}"
-            time.sleep(1)
-    return "Error"
-
-# ==========================================
-# SEQUENTIAL PIPELINE EXECUTOR
-# ==========================================
-
-def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None):
-    """
-    Generator that yields multi-agent responses progressively. Part 1.
-    """
-    session = SESSION_STORE[session_id]
-    api_key = session.get('api_key')
-    base_url = session.get('base_url')
-    model_name = session.get('model_name')
-    
-    def emit(agent, text):
-        return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
-    
-    # 1. Run the initial parsing tools
-    t1 = ingest_csv(session_id)
-    t2 = perform_data_quality_checks(session_id)
-    
-    # Flush Cloudflare/Nginx buffer with 4KB of whitespace padding
-    yield json.dumps({"type": "padding", "data": " " * 4096}) + "\n"
-    
-    # 2. Process Rate Changes
-    t3 = build_loss_triangle(session_id)
-    triangle = session.get('triangle')
-    preprocessing_text = "No premium data found in dataset to on-level."
-    if rate_changes and triangle and triangle.premiums:
-        try:
-            import pandas as pd
-            from models.on_level import OnLevelPremiumCalculator
-            prem_data = [{"accident_year": int(ay), "earned_premium": float(p)} for ay, p in triangle.premiums.items()]
-            calc = OnLevelPremiumCalculator(pd.DataFrame(prem_data), pd.DataFrame(rate_changes))
-            on_level_df = calc.calculate()
-            
-            # Update premiums in place before building the summary
-            triangle.premiums = dict(zip(on_level_df["accident_year"], on_level_df["on_level_premium"]))
-            preprocessing_text = "Action Result: Successfully calculated On-Level Premiums using the provided rate changes."
-        except Exception as e:
-            preprocessing_text = f"Action Result: Failed to calculate on-level premiums: {str(e)}"
-    elif rate_changes:
-        preprocessing_text = "Action Result: Rate changes were provided, but the uploaded dataset has no Premium column to on-level."
-    else:
-        preprocessing_text = "Action Result: No historical rate changes were provided."
-
-    # 3. Run remaining tools for part 1
-    t4 = calculate_ldfs(session_id)
-    
-    # 4. Stream Deterministic Outputs via Analysis Agent
-    yield emit("Analysis Agent", f"Data Ingestion: {t1}")
-    yield emit("Analysis Agent", f"Data Quality: {t2}")
-    yield emit("Analysis Agent", preprocessing_text)
-    yield emit("Analysis Agent", f"Triangle Builder: {t3}")
-    yield emit("Analysis Agent", f"LDF Calculator: {t4}")
-
-    # Seamlessly continue to part 2 using the newly provided context dropdowns
-    yield from execute_sequential_pipeline_part2(session_id)
-
 def compute_recommender_matrix(business_context: str, has_premium: bool, n_years: int = None) -> tuple[str, str]:
-    import json
     scores = {
         "Chain Ladder (Development Method) [Code: CL / MCL]": 0,
         "Bornhuetter-Ferguson (BF) [Code: BF]": 0,
@@ -438,78 +313,40 @@ def compute_recommender_matrix(business_context: str, has_premium: bool, n_years
 
     reason_str = "based on your responses" if not reasons else "because " + " and ".join(reasons)
     
-    # Sort models by score descending, filter out -999
     valid_models = {k: v for k, v in scores.items() if v > -900}
     sorted_models = sorted(valid_models.items(), key=lambda item: item[1], reverse=True)
     
     return sorted_models, reason_str
 
-def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
-    """
-    Generator that yields multi-agent responses progressively. Part 2.
-    """
+
+# ==========================================
+# UNIVERSAL OPENAI CLIENT AGENT RUNNER
+# ==========================================
+
+# Expose run_agent at the module level for monkeypatching support
+run_agent = utils_run_agent
+# Reference copy for checking if monkeypatched
+_original_run_agent = run_agent
+
+
+# ==========================================
+# AGENT ORCHESTRATION LAYER (Delegates to Multi-Agent Supervisor)
+# ==========================================
+
+_supervisor = SupervisorAgent()
+
+def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None):
+    """Delegates to SupervisorAgent to execute and stream pipeline part 1."""
     session = SESSION_STORE[session_id]
-    api_key = session['api_key']
-    base_url = session.get('base_url')
-    model_name = session.get('model_name')
-    
-    def emit(agent, text):
-        return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
+    yield from _supervisor.execute_sequential_pipeline_part1(session_id, session, rate_changes)
 
-    has_premium = bool(session.get('triangle') and session['triangle'].premiums)
-    business_context = session.get('business_context', '')
-    n_years = session.get('n_years')
-    
-    sorted_models, matrix_reason = compute_recommender_matrix(business_context, has_premium, n_years)
-    
-    best_model = sorted_models[0][0] if sorted_models else "None"
-    
-    # Construct mechanical HTML response
-    md_lines = [
-        f"<b>Mechanical Matrix Recommendation</b>",
-        f"<br/>The optimal method is <b>{best_model}</b>, {matrix_reason}.",
-        f"<br/><br/><b>Model Compatibility Scores:</b><br/>",
-        f"<i>(Higher is better. Incompatible models are hidden)</i><br/><ul style='margin-top: 8px;'>"
-    ]
-    for model, score in sorted_models:
-        md_lines.append(f"<li><b>{model}</b>: {score} points</li>")
-    md_lines.append("</ul>")
-        
-    recommender_text = "".join(md_lines)
-    yield emit("Recommender Agent", "I have analyzed the data and provided a model recommendation in the main panel.")
-
-    # Final Payload
-    updated_session = SESSION_STORE.get(session_id)
-    triangle = updated_session.get('triangle')
-    triangle_data = None
-    if triangle:
-        from models.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
-        mature_info = compute_mature_accident_years(triangle)
-        triangle_data = {
-            "accidentYears": triangle.accident_years,
-            "devAges": triangle.dev_ages,
-            "matrix": triangle.matrix,
-            "incurred_matrix": triangle.incurred_matrix,
-            "ldfs": updated_session.get('ldfs'),
-            "incurred_ldfs": updated_session.get('incurred_ldfs'),
-            "hasPremium": bool(triangle.premiums),
-            "suggested_elr_paid": compute_suggested_elr(triangle, "paid"),
-            "suggested_elr_incurred": compute_suggested_elr(triangle, "incurred"),
-            "suggested_mature_years": mature_info.get("mature_years", []),
-            "mature_reasoning": mature_info.get("reasoning", {}),
-            "method_availability": compute_method_availability(triangle)
-        }
-        
-    yield json.dumps({
-        "type": "complete",
-        "session_id": session_id,
-        "summary": updated_session.get('summary'),
-        "triangle": triangle_data,
-        "recommendation": recommender_text
-    }) + "\n"
+def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
+    """Delegates to SupervisorAgent to execute and stream pipeline part 2."""
+    session = SESSION_STORE[session_id]
+    yield from _supervisor.execute_sequential_pipeline_part2(session_id, session, conditions)
 
 def run_reserve_recommendation_agent(session_id: str, results_summary: list) -> dict:
-    """Invokes the Reserve Recommender Agent to recommend the best method based on comparative outcomes."""
+    """Delegates to SupervisorAgent to compile results, compare methods, and run recommendation."""
     session = SESSION_STORE.get(session_id)
     if not session:
         return {
@@ -517,221 +354,10 @@ def run_reserve_recommendation_agent(session_id: str, results_summary: list) -> 
             "confidence": "Low",
             "reasoning": ["Session expired or not found."]
         }
-        
-    api_key = session.get('api_key')
-    base_url = session.get('base_url')
-    model_name = session.get('model_name')
-    
-    summary_data = json.dumps(results_summary, indent=2)
-    
-    sys_inst = (
-        "You are an expert actuarial AI Reserving Recommender. You analyze loss reserving outputs "
-        "across multiple methods (Chain Ladder, Mack, BF, Benktander, Cape Cod, Case Outstanding, Clark) "
-        "and recommend the most appropriate method for the best estimate. "
-        "Provide your recommendation in strict JSON format containing three fields:\n"
-        "1. 'recommended_method': The code of the method (e.g. 'BK', 'BF', 'CL', 'MCL', 'CC')\n"
-        "2. 'confidence': The confidence level ('High', 'Medium', 'Low')\n"
-        "3. 'reasoning': An array of strings with key reasons for the recommendation. Do not exceed 4 reasons.\n"
-        "Respond ONLY with the raw JSON string. Do not include markdown code block formatting (like ```json)."
-    )
-    
-    prompt = (
-        f"Here are the calculated reserving indications for the current session:\n{summary_data}\n\n"
-        "Review these indications. Choose the best estimate method based on: stability of IBNR, "
-        "maturity score (immature years favor BF/BK, mature favor CL/Mack), volatility of Chain Ladder, "
-        "and Reserve-to-Case Ratio. Return the JSON recommendation."
-    )
-    
-    raw_response = run_agent(api_key, base_url, model_name, sys_inst, prompt, [])
-    
-    # Try parsing JSON
-    try:
-        cleaned = raw_response.strip()
-        if cleaned.startswith("```"):
-            lines = cleaned.split("\n")
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines[-1].startswith("```"):
-                lines = lines[:-1]
-            cleaned = "\n".join(lines)
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
-        return json.loads(cleaned)
-    except Exception as e:
-        # Fallback heuristic recommendation if LLM fails
-        best_method = "CL"
-        for r in results_summary:
-            if r.get('status') == 'success' and r.get('code') in ['BK', 'BF', 'CC']:
-                best_method = r['code']
-                break
-        return {
-            "recommended_method": best_method,
-            "confidence": "Medium",
-            "reasoning": [
-                "Auto-fallback heuristic recommendation",
-                "Favored credibility method (BK/BF/CC) over raw Chain Ladder for stability.",
-                f"Parsing details: {str(e)}"
-            ]
-        }
-
-
-# ==========================================
-# PARALLEL CHAT AGENT
-# ==========================================
+    return _supervisor.generate_recommendation_and_report(session_id, session, results_summary)
 
 def run_parallel_chat(session_id: str, message: str, history: list) -> str:
-    """Agent that sits parallel to the pipeline, with access to all data and tools."""
+    """Delegates to SupervisorAgent to process chatbot queries."""
     session = SESSION_STORE.get(session_id)
     if not session: return "Error: Session expired."
-    
-    try:
-        from models.diagnostics import compute_diagnostics
-        t = session.get('triangle')
-        diag_metrics = compute_diagnostics(t) if t else {}
-        
-        # Prune large matrices to significantly reduce token usage
-        if 'ratio_triangles' in diag_metrics:
-            for key in ['paid_to_incurred', 'settlement_rate']:
-                matrix = diag_metrics['ratio_triangles'].get(key, [])
-                if matrix and isinstance(matrix, list) and len(matrix) > 0 and isinstance(matrix[0], list):
-                    cols = len(matrix[0])
-                    avgs = []
-                    for c in range(cols):
-                        col_vals = [matrix[r][c] for r in range(len(matrix)) if c < len(matrix[r]) and matrix[r][c] is not None]
-                        avgs.append(round(sum(col_vals)/len(col_vals), 3) if col_vals else None)
-                    diag_metrics['ratio_triangles'][key] = {"average_by_development_age": avgs, "note": "Full matrix compressed to averages to save tokens."}
-    except Exception:
-        diag_metrics = {}
-        
-    context = {
-        'n_years': session.get('n_years'),
-        'summary': session.get('summary'),
-        'results': session.get('results'),
-        'ldfs_curve': session.get('ldfs'),
-        'cdfs_curve': session.get('cdfs'),
-        'development_ages_months': session.get('dev_ages'),
-        'total_ibnr': session.get('totalIBNR'),
-        'execution_report': session.get('report'),
-        'diagnostics': diag_metrics
-    }
-    
-    sys_inst = f"""You are the Analysis Chat Agent, an expert actuary. You have studied the book 'Estimating Unpaid Claims Using Basic Techniques' by Jacqueline Friedland in immense detail.
-Context: {json.dumps(context)}
-Rules:
-1. If asked about diagnostics, provide a detailed report analyzing the curves of loss ratios, development ratios, and settlement rates using the 'diagnostics' object. Reference Friedland's methodologies explicitly.
-2. For Curve Fitting, explain the mathematical fit for Pareto, Weibull, and Loglogistic distributions using the tail factors.
-3. Provide a detailed analysis of the Paid-to-Incurred ratio triangle to detect Case Reserve adequacy trends.
-4. Provide a detailed report of Settlement Rates (Closed vs Reported claims).
-5. Explain your chosen Tail Factor using the execution_report.
-6. If asked to on-level premiums, use tool 'calculate_on_level_premiums'.
-Be concise and actuarially precise."""
-    
-    api_key = session.get('api_key')
-    base_url = session.get('base_url')
-    model_name = session.get('model_name')
-    env_api_key = os.environ.get("LLM_API_KEY")
-    env_base_url = os.environ.get("LLM_BASE_URL")
-    env_model_name = os.environ.get("LLM_MODEL_NAME")
-
-    # Fallbacks (UI > Environment)
-    api_key = api_key or env_api_key
-    base_url = base_url or env_base_url
-    model_name = model_name or env_model_name
-
-    if not api_key or not model_name:
-        return "Chat Agent Error: AI settings are missing or incomplete. Please configure your LLM API Key and Model Name in the Settings panel."
-
-    messages = [{"role": "system", "content": sys_inst}]
-    for msg in history:
-        role = 'user' if msg['role'] == 'user' else 'assistant'
-        messages.append({"role": role, "content": msg['text']})
-    messages.append({"role": "user", "content": message})
-    
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "calculate_on_level_premiums",
-                "description": "Calculates on-level premiums using historical rate changes and the currently active premium dataset.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "rate_changes": {
-                            "type": "array",
-                            "description": "Array of rate changes.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "effective_date": {"type": "string", "description": "Date in YYYY-MM-DD format"},
-                                    "rate_change": {"type": "number", "description": "Rate change as a decimal (e.g. 0.05 for +5%)"}
-                                },
-                                "required": ["effective_date", "rate_change"]
-                            }
-                        }
-                    },
-                    "required": ["rate_changes"]
-                }
-            }
-        }
-    ]
-    
-    try:
-        client = OpenAI(
-            api_key=api_key, 
-            base_url=base_url if base_url else None,
-            default_headers={"ngrok-skip-browser-warning": "true"}
-        )
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            tools=tools,
-            temperature=0.5
-        )
-        
-        response_msg = response.choices[0].message
-        
-        if response_msg.tool_calls:
-            messages.append(response_msg)
-            for tool_call in response_msg.tool_calls:
-                if tool_call.function.name == "calculate_on_level_premiums":
-                    args = json.loads(tool_call.function.arguments)
-                    rc_list = args.get("rate_changes", [])
-                    
-                    triangle = session.get('triangle')
-                    if not triangle or not triangle.premiums:
-                        tool_result = "Error: No premium data available in the current dataset to on-level."
-                    else:
-                        try:
-                            import pandas as pd
-                            from models.on_level import OnLevelPremiumCalculator
-                            prem_data = [{"accident_year": int(ay), "earned_premium": float(p)} for ay, p in triangle.premiums.items()]
-                            calc = OnLevelPremiumCalculator(pd.DataFrame(prem_data), pd.DataFrame(rc_list))
-                            on_level_df = calc.calculate()
-                            tool_result = on_level_df.to_json(orient="records")
-                        except Exception as e:
-                            tool_result = f"Error computing on-level premiums: {str(e)}"
-                            
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_call.function.name,
-                        "content": tool_result
-                    })
-            
-            final_response = client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                temperature=0.5
-            )
-            return final_response.choices[0].message.content
-        else:
-            return response_msg.content
-    except openai.AuthenticationError:
-        return "Chat Agent Error: Authentication failed. Please verify your Render Environment Variables."
-    except openai.RateLimitError:
-        return "Chat Agent Error: Quota/Rate limit exceeded. Please wait a moment."
-    except openai.APIConnectionError:
-        return "Chat Agent Error: The LLM server is unreachable."
-    except Exception as e:
-        return f"Chat Agent Error: {str(e)}"
+    return _supervisor.run_parallel_chat(session_id, session, message, history)

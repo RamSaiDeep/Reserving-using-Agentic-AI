@@ -4,7 +4,7 @@ import json
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 import agent_workflow
-from models.tools import compute_suggested_elr, compute_mature_accident_years
+from reserving.core.tools import compute_suggested_elr, compute_mature_accident_years
 import copy
 from main import ExecuteRequest, MethodConfig, execute_all_models
 

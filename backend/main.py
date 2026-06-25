@@ -174,7 +174,7 @@ async def update_mappings(req: UpdateMappingsRequest):
         triangle = session.get('triangle')
         triangle_data = None
         if triangle:
-            from models.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
+            from reserving.core.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
             mature_info = compute_mature_accident_years(triangle)
             triangle_data = {
                 "accidentYears": triangle.accident_years,
@@ -215,9 +215,9 @@ async def execute_model(req: ExecuteRequest):
         if req.model_name: session['model_name'] = req.model_name
 
         from reserving.methods import METHODS
-        from models.tools import (get_environment_sensitivity, compute_ibnr_table,
-                                   compute_loss_ratios, suggest_elr,
-                                   compute_ldf_stability, compute_tail_factor)
+        from reserving.core.tools import (get_environment_sensitivity, compute_ibnr_table,
+                                           compute_loss_ratios, suggest_elr,
+                                           compute_ldf_stability, compute_tail_factor)
 
         MethodClass = METHODS.get(req.method_code)
         if not MethodClass:
@@ -247,7 +247,7 @@ async def execute_model(req: ExecuteRequest):
         if req.rate_changes and t_eval.premiums:
             try:
                 import pandas as pd
-                from models.on_level import OnLevelPremiumCalculator
+                from reserving.core.on_level import OnLevelPremiumCalculator
                 prem_data = [{"accident_year": int(ay), "earned_premium": float(p)} for ay, p in t_eval.premiums.items()]
                 calc = OnLevelPremiumCalculator(pd.DataFrame(prem_data), pd.DataFrame(req.rate_changes))
                 on_level_df = calc.calculate()
@@ -338,7 +338,7 @@ async def execute_model(req: ExecuteRequest):
         # ── Store results & Standardize ───────────────────────────────────────
         cdfs_curve = t_eval.compute_cdfs(req.custom_ldfs)
         
-        from models.standardizer import standardize_method_output
+        from reserving.core.standardizer import standardize_method_output
         std_out = standardize_method_output(
             code=req.method_code,
             label=MethodClass.label,
@@ -430,7 +430,7 @@ async def recalculate_suggestions(req: RecalculateSuggestionsRequest):
         triangle = session.get('triangle')
         if not triangle:
             return {"success": False, "error": "Triangle not found"}
-        from models.tools import compute_suggested_elr, compute_mature_accident_years
+        from reserving.core.tools import compute_suggested_elr, compute_mature_accident_years
         mature_info = compute_mature_accident_years(triangle, req.mature_cdf_threshold)
         return {
             "success": True,
@@ -452,7 +452,7 @@ async def export_data(session_id: str):
         if not triangle: return JSONResponse(status_code=400, content={"error": "No triangle data"})
         
         try:
-            from models.diagnostics import compute_diagnostics
+            from reserving.diagnostics import compute_diagnostics
             diag_metrics = compute_diagnostics(triangle)
         except Exception:
             diag_metrics = {}

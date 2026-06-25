@@ -1,5 +1,5 @@
 import json
-from models.triangle import Triangle
+from reserving.core.triangle import Triangle
 import pandas as pd
 
 with open("../data/df_masked.csv", "r") as f:

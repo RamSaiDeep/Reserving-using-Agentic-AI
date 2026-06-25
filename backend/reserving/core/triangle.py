@@ -267,8 +267,6 @@ class Triangle:
             diag.append(val)
         return diag
         
-        return diag
-        
     def compute_ldfs_for_matrix(self, matrix):
         n = len(self.dev_ages)
         ldfs = []

@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Dict, Any, List, Optional
-from models.triangle import Triangle
+from reserving.core.triangle import Triangle
 
 def standardize_method_output(
     code: str,
