@@ -31,28 +31,23 @@ class Benktander(MethodBase):
         iters = int(self.params.get('iterations', 1))
         
         for i, ay in enumerate(ays):
-            paid = diag[i] or 0
+            claims_val = diag[i] or 0
             idx = dev_idx[i]
             cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
             prem = self.triangle.premiums.get(ay, 0)
             
-            pct_rep = 1.0 / cdf if cdf > 0 else 1.0
-            q = pct_unreported = 1.0 - pct_rep
+            percent_unreported = 1.0 / cdf if cdf > 0 else 1.0
+            percent_reported = 1.0 - percent_unreported
             
-            # Initial BF
-            U_bf = paid + (prem * elr * q)
-            U_current = U_bf
-            
-            for _ in range(iters):
-                U_current = paid + (U_current * q)
-                
-            ibnr = U_current - paid
+            expected_ultimate = elr * prem
+            ultimate = (percent_unreported * expected_ultimate) + (percent_reported * claims_val)
+            ibnr = ultimate - claims_val
             
             self.results.append({
                 'ay': ay,
-                'paid': paid,
+                'paid': claims_val,
                 'cdfToUlt': round(cdf, 4),
-                'pctReported': round(pct_rep * 100, 1),
-                'ultimate': U_current,
+                'pctReported': round(percent_reported * 100, 1),
+                'ultimate': ultimate,
                 'ibnr': ibnr
             })

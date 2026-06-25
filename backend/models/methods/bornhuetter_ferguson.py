@@ -24,22 +24,23 @@ class BornhuetterFerguson(MethodBase):
         
         
         for i, ay in enumerate(ays):
-            paid = diag[i] or 0
+            claims_val = diag[i] or 0
             idx = dev_idx[i]
             cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
             prem = self.triangle.premiums.get(ay, 0)
             
-            pct_unreported = 1.0 - (1.0 / cdf) if cdf > 0 else 0
-            pct_rep = (1.0 / cdf * 100) if cdf > 0 else 100
+            percent_unreported = 1.0 / cdf if cdf > 0 else 1.0
+            percent_reported = 1.0 - percent_unreported
             
-            ibnr = prem * elr * pct_unreported
-            ultimate = paid + ibnr
+            expected_ultimate = elr * prem
+            ultimate = (percent_unreported * expected_ultimate) + (percent_reported * claims_val)
+            ibnr = ultimate - claims_val
             
             self.results.append({
                 'ay': ay,
-                'paid': paid,
+                'paid': claims_val,
                 'cdfToUlt': round(cdf, 4),
-                'pctReported': round(pct_rep, 1),
+                'pctReported': round(percent_reported * 100, 1),
                 'ultimate': ultimate,
                 'ibnr': ibnr,
                 'premium': prem

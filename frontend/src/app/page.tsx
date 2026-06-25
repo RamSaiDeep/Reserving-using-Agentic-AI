@@ -46,7 +46,7 @@ export default function Page() {
     MCL: { enabled: true },
     BF: { enabled: true, aprioriLossRatio: null },
     BK: { enabled: true, aprioriLossRatio: null, iterations: 2 },
-    CC: { enabled: true, decay: 1.0 },
+    CC: { enabled: true, decay: 1.0, aprioriLossRatio: null },
     ELR: { enabled: true, aprioriLossRatio: null },
     CLK: { enabled: true, curveType: 'weibull' },
     CO: { enabled: true }
@@ -349,7 +349,10 @@ export default function Page() {
         desc: 'Uses an overall loss ratio for stability.',
         score: 8,
         recommended: false,
-        params: [{ key: 'decay', label: 'Decay Factor', default: 1.0 }],
+        params: [
+          { key: 'aprioriLossRatio', label: 'A Priori Loss Ratio (%)', default: 65 },
+          { key: 'decay', label: 'Decay Factor', default: 1.0 }
+        ],
       },
       {
         code: 'BK',

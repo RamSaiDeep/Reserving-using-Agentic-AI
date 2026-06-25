@@ -172,7 +172,7 @@ export default function ConfigureAssumptions({
                   {config.enabled && !isDisabledByPremium && (
                     <div className="mt-4 pt-4 border-t border-border flex flex-col gap-4 animate-slide-in">
                       {/* Bornhuetter-Ferguson, Benktander, & Expected Loss Ratio settings */}
-                      {(method.code === 'BF' || method.code === 'BK' || method.code === 'ELR') && (
+                      {(method.code === 'BF' || method.code === 'BK' || method.code === 'ELR' || method.code === 'CC') && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="flex flex-col gap-1">
                             <label className="text-xs font-bold text-text-sub">A Priori Expected Loss Ratio (%)</label>

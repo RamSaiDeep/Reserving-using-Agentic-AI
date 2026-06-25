@@ -20,66 +20,52 @@ class CapeCod(MethodBase):
         ays = self.triangle.accident_years
         diag = [next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
         dev_idx = [next((i for i, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
-        decay = float(self.params.get('decay', 1.0))
-        trend_rate = float(self.params.get('trend_rate', 0.0)) / 100.0
-        use_latest_premium = bool(self.params.get('use_latest_premium', False))
         
-        latest_ay = ays[-1] if ays else 2000
-        latest_prem = self.triangle.premiums.get(latest_ay, 0)
+        # Read initial ELR from params (aprioriLossRatio) defaulting to suggested ELR if not provided or 65%
+        initial_expected_lr = float(self.params.get('aprioriLossRatio', 65)) / 100.0
         
-        # Calculate overall ELR
-        used_prem = 0
-        used_ult_cl = 0
+        reported_claims = []
+        earned_premium = []
+        for i, ay in enumerate(ays):
+            reported_claims.append(diag[i] or 0.0)
+            earned_premium.append(self.triangle.premiums.get(ay, 0.0))
+            
+        reported_claims = np.array(reported_claims)
+        earned_premium = np.array(earned_premium)
+        
+        # Step 1: Calculate expected ultimate using initial LR
+        expected_ultimate_basic = initial_expected_lr * earned_premium
+        
+        # Step 2: Calculate reported as % of expected ultimate
+        pct_reported = []
+        for rc, eub in zip(reported_claims, expected_ultimate_basic):
+            pct_reported.append(rc / eub if eub > 0 else 0.0)
+        pct_reported = np.array(pct_reported)
+        
+        # Step 3: Calculate adjusted LR (exposure-credibility weighted)
+        denom = sum(earned_premium * initial_expected_lr)
+        adjusted_expected_lr = sum(reported_claims) / denom if denom > 0 else 0.65
+        
+        # Step 4: Recalculate ultimate with adjusted LR
+        expected_ultimate = adjusted_expected_lr * earned_premium
         
         for i, ay in enumerate(ays):
-            paid = diag[i] or 0
+            claims_val = diag[i] or 0
             idx = dev_idx[i]
             cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
+            prem = earned_premium[i]
             
-            # Determine premium basis
-            if use_latest_premium and latest_prem > 0:
-                # Trend latest premium back to historical year
-                prem = latest_prem * ((1.0 + trend_rate) ** (ay - latest_ay))
-            else:
-                prem = self.triangle.premiums.get(ay, 0)
-                
-            pct_rep = 1.0 / cdf if cdf > 0 else 1.0
-            weight = decay ** (len(ays) - 1 - i)
-            
-            # Trend losses and premium to current/latest year for ELR calculation
-            trend_factor = (1.0 + trend_rate) ** (latest_ay - ay)
-            trended_paid = paid * trend_factor
-            trended_prem = prem * trend_factor
-            
-            used_prem += trended_prem * pct_rep * weight
-            used_ult_cl += trended_paid * weight
-            
-        overall_elr = used_ult_cl / used_prem if used_prem > 0 else 0.65
-        
-        for i, ay in enumerate(ays):
-            paid = diag[i] or 0
-            idx = dev_idx[i]
-            cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
-            
-            if use_latest_premium and latest_prem > 0:
-                prem = latest_prem * ((1.0 + trend_rate) ** (ay - latest_ay))
-            else:
-                prem = self.triangle.premiums.get(ay, 0)
-                
-            pct_unreported = 1.0 - (1.0 / cdf) if cdf > 0 else 0
-            # Trend overall ELR back to the historical year level to calculate IBNR
-            historical_elr = overall_elr * ((1.0 + trend_rate) ** (ay - latest_ay))
-            ibnr = prem * historical_elr * pct_unreported
-            ultimate = paid + ibnr
+            ultimate = expected_ultimate[i]
+            ibnr = ultimate - claims_val
             pct_rep = (1.0 / cdf * 100) if cdf > 0 else 100
             
             self.results.append({
                 'ay': ay,
-                'paid': paid,
+                'paid': claims_val,
                 'cdfToUlt': round(cdf, 4),
                 'pctReported': round(pct_rep, 1),
                 'ultimate': ultimate,
                 'ibnr': ibnr,
-                'capeCodELR': round(overall_elr, 4),
+                'capeCodELR': round(adjusted_expected_lr, 4),
                 'premium': prem
             })

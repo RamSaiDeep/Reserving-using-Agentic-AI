@@ -593,6 +593,9 @@ async def execute_all_models(req: ExecuteRequest):
                     assumptions['aprioriLossRatio'] = float(val) / 100.0
                     assumptions['iterations'] = int(params['iterations'])
                 elif code == 'CC':
+                    val = method_config.aprioriLossRatio if method_config.aprioriLossRatio is not None else suggested_elr_pct
+                    params['aprioriLossRatio'] = val
+                    assumptions['aprioriLossRatio'] = float(val) / 100.0
                     params['decay'] = method_config.decay if method_config.decay is not None else 1.0
                     assumptions['decay'] = float(params['decay'])
                 elif code == 'ELR':
