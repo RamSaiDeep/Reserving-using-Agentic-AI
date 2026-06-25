@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { SummaryData } from '../types';
-import { fmt, CurrencyCode } from '../utils';
+import { SummaryData } from '@/types';
+import { fmt, CurrencyCode } from '@/lib/utils';
 
 interface SummaryViewProps {
   summary: SummaryData;

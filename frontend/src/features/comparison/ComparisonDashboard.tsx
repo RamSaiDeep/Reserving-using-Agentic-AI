@@ -1,23 +1,11 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { ExecuteResult, MethodResultItem } from '../types';
-import { fmt, fmtShort, CurrencyCode } from '../utils';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  Legend,
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-} from 'recharts';
+import { ExecuteResult, MethodResultItem } from '@/types';
+import { fmt, fmtShort, CurrencyCode } from '@/lib/utils';
+import MethodTable from './MethodTable';
+import ReserveCharts from './ReserveCharts';
 
-interface ResultsViewProps {
+interface ComparisonDashboardProps {
   data: ExecuteResult;
   currency?: CurrencyCode;
   onBack: () => void;
@@ -31,10 +19,11 @@ const PROCESS_EXPLANATIONS: Record<string, string> = {
   "BK":  "Benktander iteratively refines the BF estimate: BF Ultimate is fed back as the new A Priori, and IBNR is recomputed. Each iteration shifts credibility from BF toward Chain Ladder proportional to % reported.",
   "CO":  "Case Outstanding method sets IBNR = total case reserves currently held by adjusters. It assumes zero future newly-reported claims. Reserve = Incurred − Paid = Case Reserves.",
   "CLK": "Clark Stochastic fits a continuous growth curve (Log-Logistic or Weibull) to the paid triangle using maximum likelihood. Stabilised CDFs from the curve are applied to project ultimates with a distribution of outcomes.",
-  "ELR": "Expected Loss Ratio projects future losses as Premium × Expected Loss Ratio. It does not use development factors for immature years, acting as a stable baseline indicator."
+  "ELR": "Expected Loss Ratio projects future losses as Premium × Expected Loss Ratio. It does not use development factors for missing years, acting as a stable baseline indicator.",
+  "FS":  "Frequency-Severity Method projects claim counts and average claim severities separately using historical disposal patterns and severity trends to calculate reserves."
 };
 
-export default function ResultsView({ data, currency = 'USD', onBack }: ResultsViewProps) {
+export default function ComparisonDashboard({ data, currency = 'USD', onBack }: ComparisonDashboardProps) {
   const [mounted, setMounted] = useState(false);
   const [selectedDetailCode, setSelectedDetailCode] = useState<string>('');
 
@@ -75,7 +64,6 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
     const results = caseOutstandingDetail.results;
     if (results.length === 0) return null;
     
-    // Calculate average Case CDF for immature accident years (where CDF is not 1.0)
     const immatureResults = results.filter(r => r.cdfToUlt > 1.0);
     const resultsToUse = immatureResults.length > 0 ? immatureResults : results;
     const avgCaseCdf = resultsToUse.reduce((acc, r) => acc + (r.cdfToUlt || 1.0), 0) / resultsToUse.length;
@@ -93,7 +81,6 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
     };
   }, [caseOutstandingDetail]);
 
-  // Median, Min, Max Ultimate
   const ultimateStats = useMemo(() => {
     if (activeMethods.length === 0) return { min: 0, max: 0, median: 0 };
     const ultimates = activeMethods.map(m => m.ultimate || 0).sort((a, b) => a - b);
@@ -106,13 +93,11 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
     };
   }, [activeMethods]);
 
-  // Selected method detail
   const selectedMethodDetail = useMemo(() => {
     if (!data.methods) return undefined;
     return data.methods.find(m => (m.result_id || m.code) === selectedDetailCode);
   }, [data.methods, selectedDetailCode]);
 
-  // Prepare trend data for selected method
   const trendData = useMemo(() => {
     if (!selectedMethodDetail || !selectedMethodDetail.results) return [];
     return selectedMethodDetail.results.map((r: any) => ({
@@ -127,26 +112,21 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
 
   const barChartData = useMemo(() => {
     return activeMethods.map(m => ({
-      name: m.result_id || m.code,
+      name: m.result_id || m.code || '',
       IBNR: m.ibnr || 0,
       Ultimate: m.ultimate || 0
     }));
   }, [activeMethods]);
 
-  // Format percent diff helper
-  const fmtPctDiff = (val: number) => {
-    const sign = val > 0 ? '+' : '';
-    return `${sign}${(val * 100).toFixed(1)}%`;
-  };
 
   return (
-    <div className="flex flex-col flex-1 animate-slide-in pb-10 space-y-6">
+    <div className="flex flex-col flex-1 animate-slide-in pb-10 space-y-6 text-left">
       
       {/* View Header */}
       <div className="flex justify-between items-center border-b border-border pb-3">
         <div>
-          <h2 className="text-base font-bold text-text-main">IBNR Reserving Indication Dashboard</h2>
-          <p className="text-xs text-text-sub mt-0.5 font-sans">Compare multiple mathematical projection methodologies side-by-side.</p>
+          <h2 className="text-base font-bold text-text-main">Method Comparison & Reserving Indication</h2>
+          <p className="text-xs text-text-sub mt-0.5 font-sans">Evaluate and contrast mathematical claim projection models side-by-side.</p>
         </div>
         <button
           onClick={onBack}
@@ -155,50 +135,6 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
           ← Adjust loss triangles
         </button>
       </div>
-
-      {/* 1. AI Recommendation Panel */}
-      {data.ai_recommendation && (
-        <div className="p-5 bg-accent-dim/10 border border-accent/25 rounded-xl shadow-sm flex flex-col md:flex-row gap-5 items-start">
-          <div className="flex-1 space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-accent text-white px-2 py-0.5 rounded">
-                Recommended Reserve Model
-              </span>
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
-                data.ai_recommendation.confidence === 'High' 
-                  ? 'bg-accent-green/10 border-accent-green/30 text-accent-green' 
-                  : 'bg-accent-amber/10 border-accent-amber/30 text-accent-amber'
-              }`}>
-                {data.ai_recommendation.confidence} Confidence
-              </span>
-            </div>
-            <h3 className="text-lg font-bold text-text-main flex items-center gap-2">
-              ✨ {activeMethods.find(m => m.code === data.ai_recommendation?.recommended_method)?.name || data.ai_recommendation.recommended_method}
-            </h3>
-            
-            <ul className="list-disc pl-5 text-xs text-text-sub leading-relaxed space-y-1">
-              {data.ai_recommendation.reasoning.map((r, i) => (
-                <li key={i}>{r}</li>
-              ))}
-            </ul>
-          </div>
-          
-          <div className="bg-bg-1 border border-border rounded-lg p-4 flex flex-col items-center justify-center text-center w-full md:w-48 flex-shrink-0">
-            <span className="text-[9.5px] font-bold text-text-muted uppercase tracking-wider mb-1">
-              Recommended IBNR
-            </span>
-            <span className="text-2xl font-bold font-mono text-accent-green">
-              {fmt(
-                data.methods?.find(m => m.code === data.ai_recommendation?.recommended_method)?.ibnr || data.summary?.best_estimate || 0, 
-                currency
-              )}
-            </span>
-            <span className="text-[9px] text-text-muted mt-1">
-              Best Estimate Indication
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* Case Outstanding Diagnostic Panel */}
       {coDiagnostic && (
@@ -239,88 +175,29 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
         </div>
       )}
 
-      {/* 2. Method Comparison Summary Table */}
-      <div className="space-y-3">
-        <h3 className="text-xs font-bold text-text-main uppercase tracking-wider">Method Comparison Summary</h3>
-        <div className="table-scroll border border-border rounded-lg bg-bg-1">
-          <table className="results-table w-full text-xs">
-            <thead>
-              <tr className="bg-bg-2">
-                <th>Method Code</th>
-                <th>Method Name</th>
-                <th>Status</th>
-                <th>Projected IBNR</th>
-                <th>Projected Ultimate</th>
-                <th>Diff vs Median</th>
-                <th>Impl. Loss Ratio</th>
-                <th>CV (Volatility)</th>
-                <th>Reserve/Case Ratio</th>
-                <th>Maturity Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reservingMethods.map((m, idx) => {
-                const isSuccess = m.status === 'success';
-                const isRecommended = m.result_id === data.ai_recommendation?.recommended_method || m.code === data.ai_recommendation?.recommended_method;
-                
-                return (
-                  <tr key={idx} className={`${isRecommended ? 'bg-accent-dim/15 border-l-2 border-accent font-medium' : ''}`}>
-                    <td className="font-bold text-accent font-mono">{m.result_id || m.code}</td>
-                    <td className="font-semibold text-text-main">{m.name}</td>
-                    <td>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                        m.status === 'success' 
-                          ? 'bg-accent-green/10 text-accent-green' 
-                          : m.status === 'incompatible' 
-                          ? 'bg-text-muted/10 text-text-muted' 
-                          : 'bg-accent-red/10 text-accent-red'
-                      }`}>
-                        {m.status}
-                      </span>
-                    </td>
-                    <td className="font-mono">{isSuccess ? fmt(m.ibnr, currency) : '—'}</td>
-                    <td className="font-mono font-bold text-text-main">{isSuccess ? fmt(m.ultimate, currency) : '—'}</td>
-                    <td className={`font-mono ${m.diff_from_median !== undefined && m.diff_from_median > 0 ? 'text-accent-red' : 'text-accent-green'}`}>
-                      {isSuccess && m.diff_from_median !== undefined ? fmtPctDiff(m.diff_from_median) : '—'}
-                    </td>
-                    <td className="font-mono">{isSuccess && m.loss_ratio !== undefined ? `${(m.loss_ratio * 100).toFixed(1)}%` : '—'}</td>
-                    <td className="font-mono">{isSuccess && m.cv ? `${(m.cv * 100).toFixed(1)}%` : '—'}</td>
-                    <td className="font-mono">{isSuccess && m.reserve_to_case_ratio !== undefined ? m.reserve_to_case_ratio.toFixed(2) : '—'}</td>
-                    <td className="font-mono">{isSuccess && m.maturity_score !== undefined ? `${(m.maturity_score * 100).toFixed(1)}%` : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Method Comparison Grid */}
+      <MethodTable
+        data={data}
+        currency={currency}
+        selectedDetailCode={selectedDetailCode}
+        onSelectMethod={setSelectedDetailCode}
+        activeMethods={activeMethods}
+        reservingMethods={reservingMethods}
+      />
 
-      {/* 3. Charts Grid */}
+      {/* Range Meter and IBNR Visualizations */}
       {mounted && activeMethods.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* IBNR comparison chart */}
-          <div className="lg:col-span-2 bg-bg-1 border border-border rounded-lg p-5">
-            <div className="text-[11px] font-semibold text-text-sub mb-4 uppercase tracking-wider">
-              Projected IBNR Comparison
-            </div>
-            <div className="w-full h-[250px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={barChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                  <CartesianGrid stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
-                  <XAxis dataKey="name" stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} />
-                  <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => fmtShort(v, currency)} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
-                    formatter={(v: any) => fmt(v, currency)}
-                  />
-                  <Bar dataKey="IBNR" fill="#5b7cfa" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="lg:col-span-2">
+            <ReserveCharts
+              barChartData={barChartData}
+              trendData={trendData}
+              selectedMethodName={selectedMethodDetail?.name || selectedDetailCode}
+              currency={currency}
+            />
           </div>
 
-          {/* Reserve uncertainty range */}
+          {/* Indicated Range Gauge */}
           <div className="bg-bg-1 border border-border rounded-lg p-5 flex flex-col justify-between">
             <div>
               <div className="text-[11px] font-semibold text-text-sub mb-4 uppercase tracking-wider">
@@ -342,7 +219,6 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
               </div>
             </div>
             
-            {/* Visual range bar */}
             <div className="pt-5 border-t border-border mt-4">
               <div className="h-2 bg-bg-3 rounded-full relative w-full flex items-center">
                 <div className="absolute left-[10%] w-2 h-2 rounded-full bg-text-muted" title="Min" />
@@ -360,7 +236,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
         </div>
       )}
 
-      {/* 4. Detailed Method Analysis */}
+      {/* Detailed Method Analysis AY Grid */}
       <div className="border-t border-border pt-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
@@ -379,43 +255,40 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
           </select>
         </div>
 
-        {/* Render selected detailed method outputs */}
         {selectedMethodDetail && (
           <div className="space-y-6">
-            
-            {/* Accident-year results matrix */}
-            <div className="table-scroll border border-border rounded-lg bg-bg-1">
-              <table className="results-table w-full text-xs">
+            <div className="table-scroll border border-border rounded-lg bg-bg-1 overflow-x-auto">
+              <table className="results-table w-full text-xs text-left min-w-[600px]">
                 <thead>
-                  <tr className="bg-bg-2">
-                    <th>Accident Year</th>
-                    <th>Paid/Incurred Loss</th>
-                    <th>CDF to Ultimate</th>
-                    <th>% Reported</th>
-                    <th>Projected IBNR</th>
-                    <th>Projected Ultimate</th>
+                  <tr className="bg-bg-2 border-b border-border">
+                    <th className="p-3">Accident Year</th>
+                    <th className="p-3">Paid/Incurred Loss</th>
+                    <th className="p-3">CDF to Ultimate</th>
+                    <th className="p-3">% Reported</th>
+                    <th className="p-3">Projected IBNR</th>
+                    <th className="p-3 text-right">Projected Ultimate</th>
                   </tr>
                 </thead>
                 <tbody>
                   {selectedMethodDetail.results?.map((r: any, i) => (
-                    <tr key={i}>
-                      <td className="font-semibold">{r.ay}</td>
-                      <td className="font-mono">{fmt(r.paid, currency)}</td>
-                      <td className="font-mono">{r.cdfToUlt?.toFixed(4) || '—'}</td>
-                      <td className="font-mono">{r.pctReported !== undefined ? `${r.pctReported.toFixed(1)}%` : '—'}</td>
-                      <td className="font-mono">{fmt(r.ibnr, currency)}</td>
-                      <td className="font-mono font-bold text-text-main">{fmt(r.ultimate, currency)}</td>
+                    <tr key={i} className="border-b border-border last:border-none">
+                      <td className="p-3 font-semibold">{r.ay}</td>
+                      <td className="p-3 font-mono">{fmt(r.paid, currency)}</td>
+                      <td className="p-3 font-mono">{r.cdfToUlt?.toFixed(4) || '—'}</td>
+                      <td className="p-3 font-mono">{r.pctReported !== undefined ? `${r.pctReported.toFixed(1)}%` : '—'}</td>
+                      <td className="p-3 font-mono text-accent-green">{fmt(r.ibnr, currency)}</td>
+                      <td className="p-3 font-mono font-bold text-text-main text-right">{fmt(r.ultimate, currency)}</td>
                     </tr>
                   ))}
-                  <tr className="totals-row font-bold bg-bg-2/30">
-                    <td>Total</td>
-                    <td className="font-mono">
+                  <tr className="totals-row font-bold bg-bg-2/30 border-t border-border">
+                    <td className="p-3">Total</td>
+                    <td className="p-3 font-mono">
                       {fmt(selectedMethodDetail.results?.reduce((acc, r) => acc + (r.paid || 0), 0) || 0, currency)}
                     </td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td className="font-mono">{fmt(selectedMethodDetail.ibnr || 0, currency)}</td>
-                    <td className="font-mono text-accent-green">{fmt(selectedMethodDetail.ultimate || 0, currency)}</td>
+                    <td className="p-3">—</td>
+                    <td className="p-3">—</td>
+                    <td className="p-3 font-mono text-accent-green">{fmt(selectedMethodDetail.ibnr || 0, currency)}</td>
+                    <td className="p-3 font-mono text-accent text-right">{fmt(selectedMethodDetail.ultimate || 0, currency)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -423,11 +296,9 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
 
             {/* Narrative Process Flowchart */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
-              
-              {/* Box 1: Required Inputs */}
               <div className="bg-bg-1 border border-border p-5 rounded-lg flex flex-col justify-between">
                 <div>
-                  <div className="text-[10px] font-bold text-blue-400 tracking-wider mb-3 flex items-center gap-1.5">
+                  <div className="text-[10px] font-bold text-blue-400 tracking-wider mb-3 flex items-center gap-1.5 font-sans">
                     <span className="bg-blue-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px]">1</span>
                     REQUIRED INPUTS
                   </div>
@@ -441,10 +312,9 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
                 </div>
               </div>
 
-              {/* Box 2: Mathematical Process */}
               <div className="bg-bg-1 border border-border p-5 rounded-lg flex flex-col justify-between md:col-span-2">
                 <div>
-                  <div className="text-[10px] font-bold text-accent tracking-wider mb-3 flex items-center gap-1.5">
+                  <div className="text-[10px] font-bold text-accent tracking-wider mb-3 flex items-center gap-1.5 font-sans">
                     <span className="bg-accent text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px]">2</span>
                     MATHEMATICAL RESOURCING PROCESS
                   </div>
@@ -456,56 +326,6 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
                 </div>
               </div>
             </div>
-
-            {/* Selected Method Trend Graphs */}
-            {mounted && trendData.length > 0 && (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 pt-4">
-                
-                {/* 1. IBNR vs Paid Composition */}
-                <div className="bg-bg-1 border border-border rounded-lg p-5">
-                  <div className="text-xs font-semibold text-text-sub mb-4 uppercase tracking-wider">
-                    Ultimate Composition (Paid vs IBNR)
-                  </div>
-                  <div className="w-full h-[230px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={trendData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                        <CartesianGrid stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
-                        <XAxis dataKey="ay" stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} />
-                        <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => fmtShort(v, currency)} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
-                          formatter={(v: any) => fmt(v, currency)}
-                        />
-                        <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
-                        <Bar dataKey="paid" name="Paid/Incurred to Date" stackId="a" fill="#10b981" radius={[0, 0, 4, 4]} />
-                        <Bar dataKey="ibnr" name="Projected IBNR" stackId="a" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* 2. % Reported Trends */}
-                <div className="bg-bg-1 border border-border rounded-lg p-5">
-                  <div className="text-xs font-semibold text-text-sub mb-4 uppercase tracking-wider">
-                    % Reported To Ultimate
-                  </div>
-                  <div className="w-full h-[230px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={trendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                        <CartesianGrid stroke="rgba(255, 255, 255, 0.05)" vertical={false} />
-                        <XAxis dataKey="ay" stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} />
-                        <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => `${v}%`} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
-                          formatter={(v: any) => `${v.toFixed(1)}%`}
-                        />
-                        <Line type="stepAfter" dataKey="pctReported" name="% Reported" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 4 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>

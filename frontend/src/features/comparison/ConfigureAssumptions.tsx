@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { ExecutionConfig, TriangleData, MethodConfig } from '../types';
+import { ExecutionConfig, TriangleData, MethodConfig } from '@/types';
 
 interface ConfigureAssumptionsProps {
   configs: ExecutionConfig;

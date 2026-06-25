@@ -93,6 +93,7 @@ export interface MethodConfig {
   curveType?: 'weibull' | 'loglogistic';
   approach?: string;
   inflationRate?: number;
+  matureCdfThreshold?: number;
 }
 
 export type ExecutionConfig = Record<string, MethodConfig>;
@@ -121,6 +122,8 @@ export interface MethodResultItem {
   // Backward compatibility fields
   code?: string;
   name?: string;
+  paid?: number;
+  case_outstanding?: number;
   loss_ratio?: number;
   cv?: number;
   reserve_to_case_ratio?: number;
@@ -132,6 +135,10 @@ export interface AIRecommendation {
   recommended_method: string;
   confidence: 'High' | 'Medium' | 'Low';
   reasoning: string[];
+  assumptions_used?: string;
+  cautions?: string[];
+  alternative_methods?: string[];
+  decision_trace?: string[];
 }
 
 export interface ExecuteResult {

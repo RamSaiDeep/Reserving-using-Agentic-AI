@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { TriangleData, SummaryData } from '../types';
-import { fmtShort, CurrencyCode } from '../utils';
+import { TriangleData, SummaryData } from '@/types';
+import { fmtShort, CurrencyCode } from '@/lib/utils';
 
 interface TriangleViewProps {
   triangle: TriangleData;
