@@ -246,7 +246,7 @@ async def execute_model(req: ExecuteRequest):
         if req.base_url: session['base_url'] = req.base_url
         if req.model_name: session['model_name'] = req.model_name
 
-        from models.methods import METHODS
+        from reserving.methods import METHODS
         from models.tools import (get_environment_sensitivity, compute_ibnr_table,
                                    compute_loss_ratios, suggest_elr,
                                    compute_ldf_stability, compute_tail_factor)
@@ -462,7 +462,7 @@ async def execute_all_models(req: ExecuteRequest):
         if not has_api_key or not has_model_name:
             return {"success": False, "error": "AI settings are missing or incomplete. Please configure your LLM API Key and Model Name in the Settings panel."}
         
-        from models.methods import METHODS
+        from reserving.methods import METHODS
         from models.tools import compute_suggested_elr, compute_tail_factor
         import copy
         import concurrent.futures

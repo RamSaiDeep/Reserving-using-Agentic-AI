@@ -8,7 +8,7 @@ from openai import OpenAI
 import openai
 import os
 from models.triangle import Triangle
-from models.methods import METHODS
+from reserving.methods import METHODS
 from reserving.ingestion.classifier import DataClassifier
 from reserving.ingestion.inspector import DataInspector
 

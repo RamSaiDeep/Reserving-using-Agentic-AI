@@ -1,0 +1,74 @@
+import numpy as np
+from .base import MethodBase
+
+class BornhuetterFerguson(MethodBase):
+    code = 'BF'
+    label = 'Bornhuetter-Ferguson'
+    needs_premium = True
+    
+    @classmethod
+    def get_required_params(cls):
+        return [{
+            'key': 'aprioriLossRatio',
+            'label': 'A Priori Loss Ratio (%)',
+            'type': 'percent',
+            'default': 65,
+            'hint': 'Expected loss ratio (e.g., 65 for 65%)'
+        }]
+        
+    def _compute(self):
+        ays = self.triangle.accident_years
+        diag = self.get_latest_diagonal()
+        dev_idx = self.get_development_indices()
+        inc_diag = self.get_incurred_diagonal()
+        
+        elr = float(self.params.get('aprioriLossRatio', 65)) / 100.0
+        
+        for i, ay in enumerate(ays):
+            claims_val = diag[i] or 0.0
+            idx = dev_idx[i]
+            cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
+            prem = self.triangle.premiums.get(ay, 0)
+            
+            percent_unreported = 1.0 / cdf if cdf > 0 else 1.0
+            percent_reported = 1.0 - percent_unreported
+            
+            expected_ultimate = elr * prem
+            ultimate = (percent_unreported * expected_ultimate) + (percent_reported * claims_val)
+            
+            # Clamp ultimate to incurred claims
+            inc_val = inc_diag[i] or 0.0
+            if ultimate < inc_val:
+                ultimate = inc_val
+                
+            ibnr = ultimate - claims_val
+            
+            self.results.append({
+                'ay': ay,
+                'paid': claims_val,
+                'cdfToUlt': round(cdf, 4),
+                'pctReported': round(percent_reported * 100, 1),
+                'ultimate': ultimate,
+                'ibnr': ibnr,
+                'premium': prem
+            })
+            
+        # Add IQR Outlier Detection on Ultimate Loss Ratios
+        lrs = [r['ultimate'] / r['premium'] for r in self.results if r.get('premium', 0) > 0]
+        if lrs:
+            q1 = np.percentile(lrs, 25)
+            q3 = np.percentile(lrs, 75)
+            iqr = q3 - q1
+            lower = q1 - 1.5 * iqr
+            upper = q3 + 1.5 * iqr
+            
+            for r in self.results:
+                if r.get('premium', 0) > 0:
+                    lr = r['ultimate'] / r['premium']
+                    r['outlier'] = bool(lr < lower or lr > upper)
+                else:
+                    r['outlier'] = False
+                    
+        # Add Portfolio Volatility Metric (Std Dev of IBNR)
+        ibnrs = [r['ibnr'] for r in self.results]
+        self.volatility = float(np.std(ibnrs)) if len(ibnrs) > 1 else 0.0

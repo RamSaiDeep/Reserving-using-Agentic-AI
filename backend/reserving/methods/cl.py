@@ -1,0 +1,30 @@
+import numpy as np
+from .base import MethodBase
+
+class ChainLadder(MethodBase):
+    code = 'CL'
+    label = 'Chain Ladder (Basic)'
+    needs_premium = False
+    
+    def _compute(self):
+        ays = self.triangle.accident_years
+        diag = self.get_latest_diagonal()
+        dev_idx = self.get_development_indices()
+        
+        for i, ay in enumerate(ays):
+            paid = diag[i] or 0.0
+            idx = dev_idx[i]
+            cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
+            
+            ultimate = paid * cdf
+            ibnr = ultimate - paid
+            pct_rep = (1.0 / cdf * 100) if cdf > 0 else 100
+            
+            self.results.append({
+                'ay': ay,
+                'paid': paid,
+                'cdfToUlt': round(cdf, 4),
+                'pctReported': round(pct_rep, 1),
+                'ultimate': ultimate,
+                'ibnr': ibnr
+            })
