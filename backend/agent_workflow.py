@@ -9,8 +9,8 @@ import openai
 import os
 from models.triangle import Triangle
 from models.methods import METHODS
-from models.classifier import DataClassifier
-from models.inspector import DataInspector
+from reserving.ingestion.classifier import DataClassifier
+from reserving.ingestion.inspector import DataInspector
 
 # Global Session Store
 SESSION_STORE = {}

@@ -183,7 +183,7 @@ async def update_mappings(req: UpdateMappingsRequest):
             for k, v in req.reserving_roles.items():
                 inspection.reserving_roles[k] = v
         else:
-            from models.inspector import InspectionResult, EntityCheckResult
+            from reserving.ingestion.inspector import InspectionResult, EntityCheckResult
             session['inspection'] = InspectionResult(
                 columns=[],
                 entity_check=EntityCheckResult(is_multi_entity=False, entity_column=None, entity_count=0, reasons=[]),
