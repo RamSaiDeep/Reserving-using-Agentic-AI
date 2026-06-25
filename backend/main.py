@@ -98,6 +98,25 @@ async def upload_file(
     rate_changes_json: str = Form(None),
     business_context: str = Form(None)
 ):
+    # Enforce AI settings availability
+    has_api_key = bool(api_key or os.environ.get("LLM_API_KEY"))
+    has_model_name = bool(model_name or os.environ.get("LLM_MODEL_NAME"))
+    if not has_api_key or not has_model_name:
+        async def error_stream():
+            yield json.dumps({
+                "type": "agent", 
+                "agent": "Analysis Agent", 
+                "text": "AI settings are missing or incomplete. Please configure your LLM API Key and Model Name in the Settings panel (at the top of the page) to enable the agentic reserving workflows."
+            }) + "\n"
+            yield json.dumps({
+                "type": "complete", 
+                "session_id": "", 
+                "summary": None, 
+                "triangle": None, 
+                "recommendation": None
+            }) + "\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
+
     content = await file.read()
     csv_text = content.decode('utf-8')
     
@@ -127,6 +146,21 @@ async def resume_pipeline(req: ResumePipelineRequest):
         if req.api_key: session['api_key'] = req.api_key
         if req.base_url: session['base_url'] = req.base_url
         if req.model_name: session['model_name'] = req.model_name
+
+    # Enforce AI settings availability
+    api_key = req.api_key or (session.get('api_key') if session else None)
+    model_name = req.model_name or (session.get('model_name') if session else None)
+    has_api_key = bool(api_key or os.environ.get("LLM_API_KEY"))
+    has_model_name = bool(model_name or os.environ.get("LLM_MODEL_NAME"))
+    
+    if not has_api_key or not has_model_name:
+        async def error_stream():
+            yield json.dumps({
+                "type": "agent", 
+                "agent": "Analysis Agent", 
+                "text": "AI settings are missing or incomplete. Please configure your LLM API Key and Model Name in the Settings panel."
+            }) + "\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     return StreamingResponse(
         agent_workflow.execute_sequential_pipeline_part2(req.session_id, req.conditions),
@@ -379,6 +413,15 @@ async def chat(req: ChatRequest):
             if req.base_url: session['base_url'] = req.base_url
             if req.model_name: session['model_name'] = req.model_name
             
+        # Enforce AI settings availability
+        api_key = req.api_key or (session.get('api_key') if session else None)
+        model_name = req.model_name or (session.get('model_name') if session else None)
+        has_api_key = bool(api_key or os.environ.get("LLM_API_KEY"))
+        has_model_name = bool(model_name or os.environ.get("LLM_MODEL_NAME"))
+        
+        if not has_api_key or not has_model_name:
+            return {"success": False, "error": "AI settings are missing or incomplete. Please configure your LLM API Key and Model Name in the Settings panel."}
+            
         reply = agent_workflow.run_parallel_chat(req.session_id, req.message, req.history)
         
         return {"success": True, "reply": reply}
@@ -390,6 +433,19 @@ async def execute_all_models(req: ExecuteRequest):
     try:
         session = agent_workflow.SESSION_STORE.get(req.session_id)
         if not session: return {"success": False, "error": "Invalid session_id"}
+        
+        if req.api_key: session['api_key'] = req.api_key
+        if req.base_url: session['base_url'] = req.base_url
+        if req.model_name: session['model_name'] = req.model_name
+
+        # Enforce AI settings availability
+        api_key = req.api_key or session.get('api_key')
+        model_name = req.model_name or session.get('model_name')
+        has_api_key = bool(api_key or os.environ.get("LLM_API_KEY"))
+        has_model_name = bool(model_name or os.environ.get("LLM_MODEL_NAME"))
+        
+        if not has_api_key or not has_model_name:
+            return {"success": False, "error": "AI settings are missing or incomplete. Please configure your LLM API Key and Model Name in the Settings panel."}
         
         from models.methods import METHODS
         from models.tools import compute_suggested_elr, compute_tail_factor

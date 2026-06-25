@@ -249,13 +249,16 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     env_base_url = os.environ.get("LLM_BASE_URL")
     env_model_name = os.environ.get("LLM_MODEL_NAME")
 
-    # Determine if using default/fallback settings
-    is_default = (not api_key and not env_api_key) or (api_key == "ollama") or (base_url and "ngrok-free.dev" in base_url)
+    # Fallbacks (UI > Environment)
+    api_key = api_key or env_api_key
+    base_url = base_url or env_base_url
+    model_name = model_name or env_model_name
 
-    # Fallbacks (UI > Environment > Hardcoded Defaults)
-    api_key = api_key or env_api_key or "ollama"
-    base_url = base_url or env_base_url or "https://encrypt-nail-smasher.ngrok-free.dev/v1"
-    model_name = model_name or env_model_name or "llama3.1"
+    if not api_key or not model_name:
+        return "Agent Error: AI settings are missing or incomplete. Please enter your LLM API Key and Model Name in the Settings panel."
+
+    # Determine if using a local/free endpoint (where fast timeouts are preferred)
+    is_local_or_free = (api_key == "ollama") or (base_url and ("localhost" in base_url or "127.0.0.1" in base_url or "ngrok-free.dev" in base_url))
     
     # Auto-correct Gemini native URL to OpenAI compatible URL
     if base_url and "generativelanguage.googleapis.com" in base_url:
@@ -270,9 +273,9 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     except Exception as e:
         return f"Agent Error: {str(e)}"
     
-    # Speed Optimization: Default/fallback settings should fail fast to avoid blocking actuarial workbench
-    timeout_val = 3.0 if is_default else 7.0
-    max_attempts = 1 if is_default else 2
+    # Speed Optimization: Local/free settings should fail fast to avoid blocking actuarial workbench
+    timeout_val = 3.0 if is_local_or_free else 10.0
+    max_attempts = 1 if is_local_or_free else 2
 
     # Simple retry mechanism
     for attempt in range(max_attempts):
@@ -627,17 +630,17 @@ Be concise and actuarially precise."""
     api_key = session.get('api_key')
     base_url = session.get('base_url')
     model_name = session.get('model_name')
-    if not model_name: model_name = "gpt-4o-mini"
     env_api_key = os.environ.get("LLM_API_KEY")
     env_base_url = os.environ.get("LLM_BASE_URL")
     env_model_name = os.environ.get("LLM_MODEL_NAME")
 
-    # Fallbacks (UI > Environment > Hardcoded Defaults)
-    api_key = api_key or env_api_key or "ollama"
-    base_url = base_url or env_base_url or "https://encrypt-nail-smasher.ngrok-free.dev/v1"
-    model_name = model_name or env_model_name or "llama3.1"
-    
-    if not api_key: return "Chat Agent Error: No API key provided."
+    # Fallbacks (UI > Environment)
+    api_key = api_key or env_api_key
+    base_url = base_url or env_base_url
+    model_name = model_name or env_model_name
+
+    if not api_key or not model_name:
+        return "Chat Agent Error: AI settings are missing or incomplete. Please configure your LLM API Key and Model Name in the Settings panel."
 
     messages = [{"role": "system", "content": sys_inst}]
     for msg in history:

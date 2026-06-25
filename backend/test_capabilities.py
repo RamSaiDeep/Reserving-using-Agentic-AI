@@ -60,8 +60,13 @@ req = ExecuteRequest(
     },
     paid_ldfs=[1.0] * len(t.dev_ages),
     incurred_ldfs=[1.0] * len(t.dev_ages),
-    mature_cdf_threshold=1.05
+    mature_cdf_threshold=1.05,
+    api_key="mock-key",
+    model_name="mock-model"
 )
+
+# Mock run_agent to avoid slow/unauthenticated network calls during unit test
+agent_workflow.run_agent = lambda *args, **kwargs: '{"recommended_method": "CL_PAID", "confidence": "High", "reasoning": ["Mock test reasoning"]}'
 
 class MockApp:
     def __init__(self):
