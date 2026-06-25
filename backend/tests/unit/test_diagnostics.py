@@ -1,6 +1,5 @@
 import pytest
 import numpy as np
-from reserving.core.triangle import Triangle
 from reserving.diagnostics import (
     reporting_pattern,
     ldf_stability,
@@ -12,14 +11,7 @@ from reserving.diagnostics import (
     compute_diagnostics
 )
 
-@pytest.fixture
-def sample_triangle():
-    # Load realistic test data
-    with open("../data/df_masked.csv", "r") as f:
-        csv_text = f.read()
-    t = Triangle.from_csv(csv_text)
-    return t
-
+@pytest.mark.unit
 def test_reporting_pattern(sample_triangle):
     res = reporting_pattern.analyze(sample_triangle)
     assert "best_fit_curve" in res
@@ -29,6 +21,7 @@ def test_reporting_pattern(sample_triangle):
     assert "significant_deviations" in res
     assert res["best_fit_curve"] in ["loglogistic", "weibull", "exponential", "None"]
 
+@pytest.mark.unit
 def test_ldf_stability(sample_triangle):
     res = ldf_stability.analyze(sample_triangle)
     assert "cov_by_age" in res
@@ -38,6 +31,7 @@ def test_ldf_stability(sample_triangle):
     assert "cl_assumptions_reasonable" in res
     assert isinstance(res["average_cov"], float)
 
+@pytest.mark.unit
 def test_calendar_effects(sample_triangle):
     res = calendar_effects.analyze(sample_triangle)
     assert "calendar_years" in res
@@ -48,6 +42,7 @@ def test_calendar_effects(sample_triangle):
     assert isinstance(res["slope"], float)
     assert isinstance(res["trend_detected"], bool)
 
+@pytest.mark.unit
 def test_tail_analysis(sample_triangle):
     res = tail_analysis.analyze(sample_triangle)
     assert "selected_tail" in res
@@ -57,6 +52,7 @@ def test_tail_analysis(sample_triangle):
     assert "tail_uncertainty_materiality" in res
     assert res["tail_uncertainty_materiality"] in ["High", "Moderate", "Low"]
 
+@pytest.mark.unit
 def test_outliers(sample_triangle):
     res = outliers.analyze(sample_triangle)
     assert "cell_outliers" in res
@@ -64,6 +60,7 @@ def test_outliers(sample_triangle):
     assert isinstance(res["cell_outliers"], list)
     assert isinstance(res["accident_year_ranking"], list)
 
+@pytest.mark.unit
 def test_suitability(sample_triangle):
     diag_results = {
         "reporting_pattern": reporting_pattern.analyze(sample_triangle),
@@ -82,6 +79,7 @@ def test_suitability(sample_triangle):
         assert method in scores
         assert 0 <= scores[method] <= 100
 
+@pytest.mark.unit
 def test_trace_generator():
     diag_results = {
         "ldf_stability": {"average_cov": 0.15, "cl_suitable_indicator": "Unstable"},
@@ -98,6 +96,7 @@ def test_trace_generator():
     assert "Chain Ladder suitability reduced" in trace
     assert "Mack selected because it quantifies reserve uncertainty" in trace
 
+@pytest.mark.unit
 def test_orchestrator(sample_triangle):
     res = compute_diagnostics(sample_triangle)
     # Original keys for backward compatibility

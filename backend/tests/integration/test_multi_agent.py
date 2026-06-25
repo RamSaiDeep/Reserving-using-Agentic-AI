@@ -4,7 +4,8 @@ import json
 import pytest
 import pandas as pd
 
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+# Add backend directory to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 import agent_workflow
 from agents.diagnostics_agent import DiagnosticsAgent
 from agents.reserving_agent import ReservingAgent
@@ -49,13 +50,9 @@ def mock_run_agent(api_key, base_url, model_name, sys_inst, prompt, tools=None):
         })
     return "Mock general response"
 
-
-def test_diagnostics_agent():
-    # Load test data
-    with open("../data/df_masked.csv", "r") as f:
-        csv_text = f.read()
-
-    session_id = agent_workflow.create_session(csv_text, 5)
+@pytest.mark.integration
+def test_diagnostics_agent(sample_csv_text):
+    session_id = agent_workflow.create_session(sample_csv_text, 5)
     agent_workflow.ingest_csv(session_id)
     agent_workflow.build_loss_triangle(session_id)
 
@@ -72,9 +69,8 @@ def test_diagnostics_agent():
     assert "metrics" in res
     assert "llm_analysis" in res
     assert res["llm_analysis"]["data_quality_assessment"] == "Mock quality check: Excellent data, no missing values."
-    print("DiagnosticsAgent tested successfully.")
 
-
+@pytest.mark.integration
 def test_comparison_agent():
     agent_workflow.run_agent = mock_run_agent
     agent = ComparisonAgent(api_key="mock", base_url="mock", model_name="mock")
@@ -90,9 +86,8 @@ def test_comparison_agent():
     assert "explanation" in res
     assert res["median_ultimate"] == 975.0
     assert "Method values differ slightly" in res["explanation"]
-    print("ComparisonAgent tested successfully.")
 
-
+@pytest.mark.integration
 def test_recommendation_agent():
     agent_workflow.run_agent = mock_run_agent
     agent = RecommendationAgent(api_key="mock", base_url="mock", model_name="mock")
@@ -105,9 +100,8 @@ def test_recommendation_agent():
     assert res["recommended_method"] == "CL_PAID"
     assert res["confidence"] == "High"
     assert len(res["reasoning"]) == 3
-    print("RecommendationAgent tested successfully.")
 
-
+@pytest.mark.integration
 def test_reporting_agent():
     agent_workflow.run_agent = mock_run_agent
     agent = ReportingAgent(api_key="mock", base_url="mock", model_name="mock")
@@ -115,18 +109,13 @@ def test_reporting_agent():
     res = agent.generate_report({}, {}, {}, {"recommended_method": "CL_PAID"})
     assert "report_markdown" in res
     assert "CL_PAID" in res["report_markdown"]
-    print("ReportingAgent tested successfully.")
 
-
-def test_supervisor_orchestration():
+@pytest.mark.integration
+def test_supervisor_orchestration(sample_csv_text):
     # Patch run_agent on agent_workflow
     agent_workflow.run_agent = mock_run_agent
 
-    # Load test data
-    with open("../data/df_masked.csv", "r") as f:
-        csv_text = f.read()
-
-    session_id = agent_workflow.create_session(csv_text, 5, api_key="mock", model_name="mock")
+    session_id = agent_workflow.create_session(sample_csv_text, 5, api_key="mock", model_name="mock")
     
     # Run pipeline Part 1
     stream_part1 = list(agent_workflow.execute_sequential_pipeline_part1(session_id))
@@ -150,7 +139,3 @@ def test_supervisor_orchestration():
     # Verify Chat Agent
     reply = agent_workflow.run_parallel_chat(session_id, "Explain the diagnostics summary", [])
     assert reply is not None
-    print("SupervisorAgent orchestration tested successfully.")
-
-if __name__ == "__main__":
-    pytest.main([__file__])

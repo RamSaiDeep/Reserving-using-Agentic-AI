@@ -1,23 +1,17 @@
-import os
 import sys
-import json
-import asyncio
+import os
+import pytest
+import numpy as np
 
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 import agent_workflow
 from reserving.schemas.reserving import ExecuteRequest, MethodConfig
 from reserving.services.reserving_engine import ReservingEngine
 
-def main():
-    # Load test data
-    csv_path = r"c:\Reserving-using-Agentic-AI\data\df_masked.csv"
-    with open(csv_path, "r") as f:
-        csv_text = f.read()
-
-    import numpy as np
-    
+@pytest.mark.regression
+def test_negative_ibnr_clamping_control(sample_csv_text):
     # Create session with 10 years of development
-    session_id = agent_workflow.create_session(csv_text, 10)
+    session_id = agent_workflow.create_session(sample_csv_text, 10)
     session = agent_workflow.SESSION_STORE[session_id]
     session['selected_entities'] = ['13587']
     
@@ -54,24 +48,31 @@ def main():
         res_unclamped = ReservingEngine.execute_models(req_unclamped)
         cl_paid_unclamped = next(m for m in res_unclamped["methods"] if m["result_id"] == "CL_PAID")
         
-        print("COMPARISON: CL_PAID FOR GRCODE 13587")
-        print(f"{'Accident Year':<15} | {'Paid':<12} | {'Reported':<12} | {'Ultimate (Clamped)':<20} | {'Ultimate (Unclamped)':<20} | {'IBNR (Clamped)':<15} | {'IBNR (Unclamped)':<15}")
-        print("-" * 115)
-        
+        # Check assertions
         results_clamped = cl_paid_clamped["results"]
         results_unclamped = cl_paid_unclamped["results"]
         
+        assert len(results_clamped) == len(results_unclamped)
+        
+        has_difference = False
         for rc, ru in zip(results_clamped, results_unclamped):
             ay = rc["ay"]
-            paid = rc["paid"]
-            rep = rc["reported"]
-            ult_c = rc["ultimate"]
-            ult_u = ru["ultimate"]
             ibnr_c = rc["ibnr"]
             ibnr_u = ru["ibnr"]
-            print(f"{ay:<15} | {paid:<12,.0f} | {rep:<12,.0f} | {ult_c:<20,.2f} | {ult_u:<20,.2f} | {ibnr_c:<15,.2f} | {ibnr_u:<15,.2f}")
+            
+            # Clamped IBNR must always be non-negative
+            assert ibnr_c >= 0.0, f"Clamped IBNR is negative ({ibnr_c}) in accident year {ay}!"
+            
+            if abs(ibnr_c - ibnr_u) > 1e-4:
+                has_difference = True
+                # Ultimate when clamped must be equal to paid, and IBNR must be 0
+                assert ibnr_c == 0.0, f"Expected clamped IBNR to be 0 when clamping applied, got {ibnr_c}"
+                assert rc["ultimate"] == rc["reported"], f"Expected ultimate to equal reported when clamped"
+                assert ibnr_u < 0.0, f"Expected unclamped IBNR to be negative when there is a difference, got {ibnr_u}"
+                
+        # Ensure that our test data actually triggered clamping for at least one year
+        # (this confirms the regression test is actively testing clamping)
+        assert has_difference, "Test did not trigger any negative IBNR clamping difference! Check test data."
+        
     finally:
         agent_workflow.run_reserve_recommendation_agent = orig_recommend
-
-main()
-
