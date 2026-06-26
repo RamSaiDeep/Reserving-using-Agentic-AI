@@ -30,7 +30,7 @@ app.add_middleware(
 def read_root():
     return {"status": "healthy", "message": "Agentic Actuarial Reserving Backend is running"}
 
-from models.schemas import MethodConfig, ExecuteRequest, RecommendationRequest
+from reserving.schemas import MethodConfig, ExecuteRequest, RecommendationRequest
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -157,7 +157,7 @@ async def update_mappings(req: UpdateMappingsRequest):
             for k, v in req.reserving_roles.items():
                 inspection.reserving_roles[k] = v
         else:
-            from models.inspector import InspectionResult, EntityCheckResult
+            from reserving.ingestion.inspector import InspectionResult, EntityCheckResult
             session['inspection'] = InspectionResult(
                 columns=[],
                 entity_check=EntityCheckResult(is_multi_entity=False, entity_column=None, entity_count=0, reasons=[]),
@@ -180,7 +180,7 @@ async def update_mappings(req: UpdateMappingsRequest):
         triangle = session.get('triangle')
         triangle_data = None
         if triangle:
-            from models.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
+            from reserving.core.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
             mature_info = compute_mature_accident_years(triangle)
             triangle_data = {
                 "accidentYears": triangle.accident_years,
@@ -210,7 +210,7 @@ async def update_mappings(req: UpdateMappingsRequest):
 @app.post("/api/execute")
 async def execute_model(req: ExecuteRequest):
     try:
-        from models.services import ReservingEngine
+        from reserving.services import ReservingEngine
         result = ReservingEngine.execute_single_model(req)
         
         # Add compliance audit to result if successful
@@ -283,7 +283,7 @@ async def override_compliance(req: OverrideRequest):
 @app.post("/api/execute_all")
 async def execute_all_models(req: ExecuteRequest):
     try:
-        from models.services import ReservingEngine
+        from reserving.services import ReservingEngine
         return ReservingEngine.execute_models(req)
     except Exception as e:
         import traceback
@@ -390,7 +390,7 @@ async def recalculate_suggestions(req: RecalculateSuggestionsRequest):
         triangle = session.get('triangle')
         if not triangle:
             return {"success": False, "error": "Triangle not found"}
-        from models.tools import compute_suggested_elr, compute_mature_accident_years
+        from reserving.core.tools import compute_suggested_elr, compute_mature_accident_years
         mature_info = compute_mature_accident_years(triangle, req.mature_cdf_threshold)
         return {
             "success": True,
@@ -422,7 +422,7 @@ async def export_data(session_id: str):
             t_diag.data_type = "incurred"
             
         try:
-            from models.diagnostics import compute_diagnostics
+            from reserving.diagnostics import compute_diagnostics
             diag_metrics = compute_diagnostics(t_diag)
         except Exception:
             diag_metrics = {}
