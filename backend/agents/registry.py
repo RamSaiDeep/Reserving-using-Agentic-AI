@@ -1,5 +1,6 @@
 METHOD_ALIASES = {
     "chain ladder": "CL",
+    "chainladder": "CL",
     "cl": "CL",
     "mack": "MCL",
     "mack chain ladder": "MCL",

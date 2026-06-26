@@ -96,6 +96,7 @@ def parse_request(message: str, history: list = None) -> dict:
         "triangle", "ldf", "cdf", "tail", "development", "loss", "premium", "diagnostic", 
         "outlier", "stability", "suitability", "comparison", "recommendation", "on-level",
         "inflation", "volatility", "case reserves", "adequacy", "mack", "friedland", "chain ladder",
+        "chainladder", "method", "methods", "frequencyseverity", "bornhuetterferguson",
         "bornhuetter", "ferguson", "cape cod", "benktander", "clark", "expected loss",
         "row", "rows", "column", "columns", "variable", "variables", "shape", "dimension", "dimensions",
         "accident year", "accident years", "missing value", "missing values", "missing", "entity", "entities",

@@ -467,7 +467,7 @@ class ChatClassifier:
             intent = ChatIntent.REPORT
         elif "diagnostic" in msg_lower or "outlier" in msg_lower or "stability" in msg_lower or "suitability" in msg_lower:
             intent = ChatIntent.DIAGNOSTIC
-        elif any(m in msg_lower for m in ["chain ladder", "mack", "bf", "bornhuetter", "cape cod", "benktander", "clark"]) and is_conceptual_query:
+        elif (any(m in msg_lower for m in ["chain ladder", "chainladder", "mack", "bf", "bornhuetter", "cape cod", "benktander", "clark"]) or methods) and is_conceptual_query:
             intent = ChatIntent.METHOD_EXPLANATION
         elif is_conceptual_query and not has_specific_reserving_entities:
             intent = ChatIntent.CONCEPTUAL

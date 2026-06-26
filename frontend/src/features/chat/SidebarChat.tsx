@@ -60,6 +60,11 @@ function parseMarkdownToHtml(markdown: string): string {
 
   html = processedLines.join('\n');
 
+  html = html.replace(/\\\[([\s\S]*?)\\\]/g, '<div class="math-block bg-bg-2 border border-border rounded p-2 my-1.5 font-mono text-xs overflow-x-auto">$1</div>');
+  html = html.replace(/\\\(([^)]*?)\\\)/g, '<span class="math-inline font-mono text-xs bg-bg-2 border border-border rounded px-1">$1</span>');
+  html = html.replace(/`([^`]+)`/g, '<code class="font-mono text-xs bg-bg-2 border border-border rounded px-1">$1</code>');
+  html = html.replace(/^# (.+)$/gm, '<strong class="text-text-main text-xs block mt-2 mb-1">$1</strong>');
+
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
   html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
