@@ -1,4 +1,6 @@
 import json
+import re
+from enum import Enum
 
 class DiagnosticsPromptBuilder:
     """Builds and renders prompts for DiagnosticsAgent."""
@@ -372,98 +374,380 @@ class ReportingPromptBuilder:
         
         return sys_inst, prompt, sections
 
+class ChatIntent(str, Enum):
+    UNKNOWN = "UNKNOWN"
+    CONCEPTUAL = "CONCEPTUAL"
+    COLUMN_INFO = "COLUMN_INFO"
+    DATA_EXPLORATION = "DATA_EXPLORATION"
+    CALCULATION = "CALCULATION"
+    METHOD_EXPLANATION = "METHOD_EXPLANATION"
+    DIAGNOSTIC = "DIAGNOSTIC"
+    RECOMMENDATION = "RECOMMENDATION"
+    COMPARISON = "COMPARISON"
+    REPORT = "REPORT"
+
+class ChatRequest:
+    def __init__(
+        self,
+        intent: ChatIntent,
+        methods: list = None,
+        basis: str = None,
+        columns: list = None,
+        comparison: bool = False,
+        recommendation: bool = False,
+        message: str = "",
+        entities: dict = None
+    ):
+        self.intent = intent
+        self.methods = methods or []
+        self.basis = basis  # "paid", "incurred", "both", or None
+        self.columns = columns or []
+        self.comparison = comparison
+        self.recommendation = recommendation
+        self.message = message
+        self.entities = entities or {}
+
+class ChatClassifier:
+    @staticmethod
+    def classify(message: str, parsed_req: dict) -> ChatRequest:
+        msg_lower = message.lower().strip()
+        
+        # Extract intent from parsed_req
+        parsed_intent = parsed_req.get("intent", "ACTUARIAL_KNOWLEDGE")
+        
+        # Reserving methods & basis
+        methods = parsed_req.get("methods") or []
+        basis = parsed_req.get("basis")
+        
+        # Flags
+        comparison = parsed_req.get("comparison", False)
+        recommendation = parsed_req.get("recommendation", False)
+        
+        # Entities dictionary
+        entities = {}
+        
+        # Extract accident year from message (e.g. "for 1997", "accident year 1995", "1994 reserve")
+        ay_match = re.search(r'\b(19\d{2}|20\d{2})\b', msg_lower)
+        if ay_match:
+            entities["accident_year"] = int(ay_match.group(1))
+            
+        # Extract number/parameter to identify if it is unknown
+        num_matches = re.findall(r'\b\d+\b', msg_lower)
+        # Exclude years from numeric parameters
+        non_year_nums = [n for n in num_matches if not (n.startswith("19") or n.startswith("20")) or len(n) != 4]
+        if non_year_nums:
+            entities["numeric_parameter"] = non_year_nums[0]
+            
+        # Extract columns mentioned in message
+        columns = []
+        # Check standard columns
+        for col_name in ["accidentyear", "developmentlag", "cumpaidloss_c", "earnedpremnet_c", "postedreserve97_c", "bulkloss_c"]:
+            if col_name in msg_lower:
+                columns.append(col_name)
+        
+        # Map parsed_req intent to ChatIntent
+        intent = ChatIntent.CONCEPTUAL
+        
+        is_conceptual_query = any(w in msg_lower for w in ["what is", "explain", "definition", "meaning of", "define", "concept"])
+        has_specific_reserving_entities = (
+            len(methods) > 0 or 
+            bool(basis) or 
+            "accident_year" in entities or 
+            any(w in msg_lower for w in ["calculate", "compute", "run", "triangle", "method", "estimate", "results"])
+        )
+        
+        # Check unknown triggers:
+        if parsed_intent == "OUT_OF_SCOPE":
+            intent = ChatIntent.UNKNOWN
+        elif comparison or "compare" in msg_lower or "vs" in msg_lower:
+            intent = ChatIntent.COMPARISON
+        elif recommendation or "recommend" in msg_lower or "best estimate" in msg_lower:
+            intent = ChatIntent.RECOMMENDATION
+        elif "report" in msg_lower or "summary" in msg_lower or "summarise" in msg_lower:
+            intent = ChatIntent.REPORT
+        elif "diagnostic" in msg_lower or "outlier" in msg_lower or "stability" in msg_lower or "suitability" in msg_lower:
+            intent = ChatIntent.DIAGNOSTIC
+        elif any(m in msg_lower for m in ["chain ladder", "mack", "bf", "bornhuetter", "cape cod", "benktander", "clark"]) and is_conceptual_query:
+            intent = ChatIntent.METHOD_EXPLANATION
+        elif is_conceptual_query and not has_specific_reserving_entities:
+            intent = ChatIntent.CONCEPTUAL
+        elif parsed_intent == "DATASET_QUERY" or any(k in msg_lower for k in ["row", "column", "variable", "shape", "dimension", "size", "record", "header", "field"]):
+            # Differentiate COLUMN_INFO vs DATA_EXPLORATION
+            if any(k in msg_lower for k in ["column", "variable", "field", "schema", "header"]):
+                intent = ChatIntent.COLUMN_INFO
+            else:
+                intent = ChatIntent.DATA_EXPLORATION
+        elif parsed_intent == "CALCULATION_QUERY" or len(methods) > 0 or bool(basis) or "accident_year" in entities or "reserve" in msg_lower or "ultimate" in msg_lower or "ibnr" in msg_lower:
+            intent = ChatIntent.CALCULATION
+            
+        if columns:
+            entities["columns"] = columns
+            
+        return ChatRequest(
+            intent=intent,
+            methods=methods,
+            basis=basis,
+            columns=columns,
+            comparison=comparison,
+            recommendation=recommendation,
+            message=message,
+            entities=entities
+        )
+
+class ContextBuilder:
+    @staticmethod
+    def build(session_data: dict, chat_req: ChatRequest) -> dict:
+        intent = chat_req.intent
+        
+        # Priority-Based Context Assembly dictionaries
+        context_items = {
+            1: {}, # Priority 1 (Highest)
+            2: {}, # Priority 2 (High)
+            3: {}, # Priority 3 (Medium)
+            4: {}  # Priority 4 (Low)
+        }
+        
+        # Always include basic session properties (Priority 1)
+        context_items[1]["n_years"] = session_data.get('n_years')
+        if chat_req.basis:
+            context_items[1]["requested_basis"] = chat_req.basis
+            
+        results_val = session_data.get('results') or {}
+        
+        if intent == ChatIntent.CONCEPTUAL:
+            pass
+            
+        elif intent == ChatIntent.METHOD_EXPLANATION:
+            methods_list = chat_req.methods if chat_req.methods else ["CL", "MCL", "BF", "CC", "BK", "CLK", "ELR"]
+            metadata = {}
+            for m in methods_list:
+                m_upper = m.upper()
+                if m_upper == "CL":
+                    metadata["Chain Ladder (CL)"] = {
+                        "description": "Projects future claims by multiplying cumulative paid or incurred losses by loss development factors.",
+                        "assumptions": "Historical development patterns will continue into the future.",
+                        "inputs": "Cumulative loss triangle.",
+                        "outputs": "Ultimate losses, IBNR, and Reserve.",
+                        "limitations": "Highly sensitive to outliers and assumes stable reporting/settlement patterns."
+                    }
+                elif m_upper == "MCL":
+                    metadata["Mack Chain Ladder (MCL)"] = {
+                        "description": "A distribution-free formula to estimate the standard error of the Chain Ladder ultimate loss projections.",
+                        "assumptions": "Claims in different accident years are independent; variance of future development is proportional to the previous loss.",
+                        "inputs": "Cumulative loss triangle.",
+                        "outputs": "Ultimate losses, IBNR, parameter/process error, standard error of reserves.",
+                        "limitations": "Subject to the same structural limitations as Chain Ladder, requires positive cumulative values."
+                    }
+                elif m_upper == "BF":
+                    metadata["Bornhuetter-Ferguson (BF)"] = {
+                        "description": "Estimates IBNR by multiplying an a priori expected loss ratio (ELR) by the earned premium and the percentage of claims unpaid/unreported.",
+                        "assumptions": "Unreported losses develop according to the prior expected loss ratio, independent of actual claims to date.",
+                        "inputs": "Premium, prior expected loss ratio (ELR), loss development pattern.",
+                        "outputs": "IBNR, Ultimate losses, Reserve.",
+                        "limitations": "Dependent on the accuracy of the a priori ELR assumption."
+                    }
+                elif m_upper == "CC":
+                    metadata["Cape Cod (CC)"] = {
+                        "description": "A Bornhuetter-Ferguson derivative where the expected loss ratio is estimated directly from the historical experience of all accident years combined.",
+                        "assumptions": "Expected losses are proportional to exposure (earned premium), and the overall ELR across years is stable.",
+                        "inputs": "Premium/exposure, cumulative loss triangle, LDFs.",
+                        "outputs": "IBNR, Ultimate losses, Reserve.",
+                        "limitations": "Assumes a stable base ELR; less suitable if exposures are changing significantly."
+                    }
+                elif m_upper == "BK":
+                    metadata["Benktander (BK)"] = {
+                        "description": "An iterative method that blends the Chain Ladder and Bornhuetter-Ferguson methods, acting as a credibility-weighted average.",
+                        "assumptions": "Prior estimates can be updated iteratively to form a more stable estimate than CL.",
+                        "inputs": "Premium, expected loss ratio, loss development pattern.",
+                        "outputs": "Ultimate losses, IBNR.",
+                        "limitations": "Computationally more complex; depends on initial ELR quality."
+                    }
+            context_items[3]["methods_metadata"] = metadata
+            
+        elif intent == ChatIntent.COLUMN_INFO:
+            context_items[2]["original_columns"] = session_data.get('summary', {}).get('original_columns', [])
+            if chat_req.columns:
+                context_items[1]["requested_columns"] = chat_req.columns
+                
+        elif intent == ChatIntent.DATA_EXPLORATION:
+            df = session_data.get('df')
+            if df is not None:
+                context_items[2]["dataset_summary"] = {
+                    "shape": f"{df.shape[0]} rows by {df.shape[1]} columns",
+                    "columns": list(df.columns),
+                    "missing_values_count": int(df.isnull().sum().sum())
+                }
+            summary = session_data.get('summary') or {}
+            if summary.get('entities'):
+                context_items[2]["entities_present"] = summary.get('entities')
+                
+        elif intent == ChatIntent.CALCULATION:
+            methods_out = results_val.get('methods') or []
+            min_methods = []
+            for m in methods_out:
+                if m.get("status") == "success":
+                    code = m.get("code")
+                    base_code = code.split('_')[0].upper()
+                    if chat_req.methods and base_code not in [meth.upper() for meth in chat_req.methods]:
+                        continue
+                    min_methods.append({
+                        "code": code,
+                        "name": m.get("name"),
+                        "ultimate": m.get("ultimate"),
+                        "ibnr": m.get("ibnr"),
+                        "loss_ratio": m.get("loss_ratio"),
+                        "reserve": m.get("reserve")
+                    })
+            context_items[1]["methods_summary"] = min_methods
+            
+            context_items[1]["overall_results"] = {
+                "selected_method": results_val.get('selected_method', 'CL'),
+                "best_estimate": results_val.get('best_estimate', 0.0),
+                "total_ibnr": session_data.get('totalIBNR', 0.0)
+            }
+            if "accident_year" in chat_req.entities:
+                context_items[1]["target_accident_year"] = chat_req.entities["accident_year"]
+                
+        elif intent == ChatIntent.DIAGNOSTIC:
+            diag_analysis = session_data.get('diagnostics_analysis') or {}
+            metrics = diag_analysis.get('metrics') or {}
+            overall = metrics.get('overall') or {}
+            ldf_stability = metrics.get('ldf_stability') or {}
+            
+            context_items[3]["diagnostics"] = {
+                "n_accident_years": overall.get("n_accident_years"),
+                "n_dev_periods": overall.get("n_dev_periods"),
+                "average_ldf_cov": ldf_stability.get("average_cov"),
+                "ldf_suitability_indicator": ldf_stability.get("cl_suitable_indicator"),
+                "data_quality_assessment": diag_analysis.get('llm_analysis', {}).get('data_quality_assessment', 'Standard')
+            }
+            if session_data.get('ldfs'):
+                context_items[4]["ldfs_curve"] = session_data.get('ldfs')
+            if session_data.get('cdfs'):
+                context_items[4]["cdfs_curve"] = session_data.get('cdfs')
+                
+        elif intent == ChatIntent.RECOMMENDATION:
+            rec_val = session_data.get('recommendation') or {}
+            context_items[2]["recommendation"] = {
+                "recommended_method": rec_val.get("recommended_method"),
+                "confidence": rec_val.get("confidence"),
+                "reasoning": rec_val.get("reasoning", [])[:3],
+                "cautions": rec_val.get("cautions", [])[:3]
+            }
+            diag_analysis = session_data.get('diagnostics_analysis') or {}
+            metrics = diag_analysis.get('metrics') or {}
+            overall = metrics.get('overall') or {}
+            context_items[3]["diagnostics_summary"] = {
+                "n_accident_years": overall.get("n_accident_years"),
+                "n_dev_periods": overall.get("n_dev_periods"),
+                "total_paid": overall.get("total_paid")
+            }
+            
+        elif intent == ChatIntent.COMPARISON:
+            methods_out = results_val.get('methods') or []
+            min_methods = []
+            for m in methods_out:
+                if m.get("status") == "success":
+                    code = m.get("code")
+                    base_code = code.split('_')[0].upper()
+                    if chat_req.methods and base_code not in [meth.upper() for meth in chat_req.methods]:
+                        continue
+                    min_methods.append({
+                        "code": code,
+                        "name": m.get("name"),
+                        "ultimate": m.get("ultimate"),
+                        "ibnr": m.get("ibnr"),
+                        "reserve": m.get("reserve")
+                    })
+            context_items[1]["methods_compared"] = min_methods
+            
+            context_items[2]["comparison_summary"] = {
+                "selected_method": results_val.get('selected_method', 'CL'),
+                "best_estimate": results_val.get('best_estimate', 0.0)
+            }
+            
+        elif intent == ChatIntent.REPORT:
+            context_items[2]["report_summary"] = {
+                "selected_method": results_val.get('selected_method', 'CL'),
+                "best_estimate": results_val.get('best_estimate', 0.0),
+                "total_ibnr": session_data.get('totalIBNR', 0.0)
+            }
+            rec_val = session_data.get('recommendation') or {}
+            context_items[2]["recommendation"] = {
+                "recommended_method": rec_val.get("recommended_method"),
+                "confidence": rec_val.get("confidence")
+            }
+            
+        assembled_context = {}
+        for p in [1, 2, 3, 4]:
+            assembled_context.update(context_items[p])
+            
+        context_str = json.dumps(assembled_context)
+        if len(context_str) > 3000:
+            for key in context_items[4].keys():
+                assembled_context.pop(key, None)
+            context_str = json.dumps(assembled_context)
+            
+            if len(context_str) > 3000:
+                for key in context_items[3].keys():
+                    assembled_context.pop(key, None)
+                context_str = json.dumps(assembled_context)
+                
+                if len(context_str) > 3000:
+                    for key in context_items[2].keys():
+                        assembled_context.pop(key, None)
+                        
+        return assembled_context
 
 class ChatPromptBuilder:
     """Builds and renders prompts for ChatAgent in supervisor.py."""
     
     @staticmethod
-    def build_context(session_data: dict) -> dict:
-        results_val = session_data.get('results') or {}
-        min_results = {
-            "selected_method": results_val.get('selected_method', 'CL'),
-            "best_estimate": results_val.get('best_estimate', 0.0),
-            "total_ibnr": session_data.get('totalIBNR', 0.0)
-        }
-        
-        # Condensed summary of mathematical results
-        min_methods = []
-        methods_out = results_val.get('methods') or []
-        for m in methods_out:
-            if m.get("status") == "success":
-                min_methods.append({
-                    "code": m.get("code"),
-                    "name": m.get("name"),
-                    "ultimate": m.get("ultimate"),
-                    "ibnr": m.get("ibnr"),
-                    "loss_ratio": m.get("loss_ratio")
-                })
-                
-        # Condensed diagnostic indicators (instead of raw JSON dump)
-        diag_analysis = session_data.get('diagnostics_analysis') or {}
-        metrics = diag_analysis.get('metrics') or {}
-        overall = metrics.get('overall') or {}
-        ldf_stability = metrics.get('ldf_stability') or {}
-        
-        min_diagnostics = {
-            "n_accident_years": overall.get("n_accident_years"),
-            "n_dev_periods": overall.get("n_dev_periods"),
-            "total_paid": overall.get("total_paid"),
-            "average_ldf_cov": ldf_stability.get("average_cov"),
-            "ldf_suitability_indicator": ldf_stability.get("cl_suitable_indicator"),
-            "diagnostics_text_assessment": diag_analysis.get('llm_analysis', {}).get('data_quality_assessment', 'Standard')
-        }
-        
-        # Selected recommendation parameters
-        rec_val = session_data.get('recommendation') or {}
-        min_recommendation = {
-            "recommended_method": rec_val.get("recommended_method"),
-            "confidence": rec_val.get("confidence"),
-            "reasoning": rec_val.get("reasoning", [])[:3],  # top 3 reasons
-            "cautions": rec_val.get("cautions", [])[:3]      # top 3 cautions
-        }
-        
-        return {
-            "n_years": session_data.get('n_years'),
-            "results": min_results,
-            "methods_summary": min_methods,
-            "diagnostics": min_diagnostics,
-            "recommendation": min_recommendation,
-            "execution_report": session_data.get('report_markdown', 'No report compiled.'),
-            "ldfs_curve": session_data.get('ldfs'),
-            "cdfs_curve": session_data.get('cdfs')
-        }
-        
-    @staticmethod
-    def render(context: dict) -> tuple[str, dict]:
-        context_json = json.dumps({
-            "n_years": context["n_years"],
-            "results": context["results"],
-            "methods_summary": context["methods_summary"],
-            "diagnostics": context["diagnostics"],
-            "recommendation": context["recommendation"],
-            "ldfs_curve": context["ldfs_curve"],
-            "cdfs_curve": context["cdfs_curve"]
-        })
+    def render(context: dict, intent: ChatIntent) -> tuple[str, dict]:
+        context_json = json.dumps(context)
         
         sys_inst = (
-            "You are the Analysis Chat Agent, an expert actuary. You have studied the book 'Estimating Unpaid Claims "
-            "Using Basic Techniques' by Jacqueline Friedland in immense detail.\n\n"
-            f"Context Data:\n{context_json}\n\n"
-            f"Actuarial Execution Report (Markdown):\n{context['execution_report']}\n\n"
-            "Rules:\n"
-            "1. If asked about diagnostics, provide a detailed report analyzing the curves of loss ratios, development ratios, and settlement rates using the context objects. Reference Friedland's methodologies explicitly.\n"
-            "2. For Curve Fitting, explain the mathematical fit for Pareto, Weibull, and Loglogistic distributions using the tail factors.\n"
-            "3. Provide a detailed analysis of the Paid-to-Incurred ratio triangle to detect Case Reserve adequacy trends.\n"
-            "4. Provide a detailed report of Settlement Rates (Closed vs Reported claims).\n"
-            "5. Explain your chosen Tail Factor using the execution report.\n"
-            "6. If asked to on-level premiums, use tool 'calculate_on_level_premiums'.\n"
-            "Be concise and actuarially precise."
+            "You are the Actuarial AI Assistant, an experienced senior actuarial consultant.\n"
+            "You are having a professional conversation with another actuary.\n\n"
+            f"Current Query Intent: {intent.value}\n"
+            f"Context Data (JSON): {context_json}\n\n"
+            "Core Decision Tree Workflow:\n"
+            "1. Do I understand the user's request? If not, enter Clarification Mode.\n"
+            "2. Do I have enough information? If not, enter Clarification Mode.\n"
+            "3. Does the answer depend on uploaded data? If yes, answer using the current session context.\n"
+            "4. Does the answer depend on execution results? If yes, use the current session results.\n"
+            "5. Otherwise answer using actuarial knowledge.\n\n"
+            "Clarification Mode Rules:\n"
+            "- Trigger Clarification Mode whenever a required parameter (e.g. reserving method, column name, accident year, paid vs incurred basis) is missing or ambiguous.\n"
+            "- Never guess or fabricate missing information. Never pretend to know.\n"
+            "- Ask exactly one targeted clarification question.\n"
+            "- Suggest selectable options (e.g., bullet lists using '•') to guide the user.\n"
+            "- Do not continue reasoning or provide a guess after entering Clarification Mode. Stop immediately and wait.\n\n"
+            "Confidence Gates:\n"
+            "- Never state uncertain information as fact.\n"
+            "- If information cannot be verified, state that it is an inference, explain what is known, and what cannot be confirmed. (e.g. 'postedreserve97_c likely represents a posted reserve recorded during the 1997 valuation, but the dataset itself doesn't explicitly define it').\n\n"
+            "Actuarial Accuracy Rule:\n"
+            "- Use the definitions implemented by the application:\n"
+            "  • Reserve = Ultimate - Paid\n"
+            "  • IBNR = Ultimate - Reported\n"
+            "If actuarial literature differs, explain and use the application's definitions instead of replacing them.\n\n"
+            "Response Style & Formatting:\n"
+            "- Be conversational. Keep answers concise by default (approx. 3–6 sentences).\n"
+            "- Avoid raw prompt markdown artifacts (e.g., repeating formatting or JSON structures).\n"
+            "- Avoid report-style headings or section titles unless explicitly requested.\n"
+            "- Never restate information the user already knows (e.g. 'You uploaded...') unless necessary.\n"
+            "- Allow lists (numbered or bulleted), selective bold text for readability, and simple tables (only when comparing multiple methods).\n\n"
+            "Adaptive Response Templates:\n"
+            "- Conceptual: Short explanation + why it matters + small practical example.\n"
+            "- Dataset/Column: Direct answer + small markdown table (if helpful) + suggested follow-up questions.\n"
+            "- Calculation: Direct result + key numbers + one-sentence interpretation.\n"
+            "- Comparison: Compact comparison table + takeaway.\n\n"
+            "Be conversational, senior, concise, and actuarially precise."
         )
         
         sections = {
-            "system_actuary_role": "You are the Analysis Chat Agent...",
-            "context_variables": context_json,
-            "actuarial_execution_report": context["execution_report"]
+            "system_actuary_role": "You are the Actuarial AI Assistant...",
+            "context_variables": context_json
         }
         
         return sys_inst, sections

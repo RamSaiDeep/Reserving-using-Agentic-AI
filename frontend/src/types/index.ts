@@ -146,6 +146,7 @@ export interface AIRecommendation {
 export interface ExecuteResult {
   success: boolean;
   run_id?: string;
+  execution_id?: string;
   timestamp?: string;
   selected_methods?: string[];
   paid_ldfs?: number[];
