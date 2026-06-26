@@ -7,11 +7,15 @@ import concurrent.futures
 from openai import OpenAI
 import openai
 import os
-from models.triangle import Triangle
-from models.methods import METHODS
-from models.classifier import DataClassifier
-from models.inspector import DataInspector
+from reserving.core.triangle import Triangle
+from reserving.methods import METHODS
+from reserving.ingestion.classifier import DataClassifier
+from reserving.ingestion.inspector import DataInspector
 from models.compliance import ComplianceEngine
+
+# Import Multi-Agent Supervisor
+from agents.supervisor import SupervisorAgent
+from agents.utils import run_agent as utils_run_agent
 
 # Global Session Store
 SESSION_STORE = {}

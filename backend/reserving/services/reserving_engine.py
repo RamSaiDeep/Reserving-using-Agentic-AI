@@ -605,6 +605,16 @@ class ReservingEngine:
         timestamp = datetime.datetime.utcnow().isoformat() + "Z"
         selected_methods = [code for code, cfg in configs.items() if cfg.enabled]
 
+        # ── TOOL: Compliance Engine (ASOP) ────────────────────────────────────
+        compliance_audit = {}
+        if 'compliance_engine' in session:
+            ce = session['compliance_engine']
+            executed = [m["code"] for m in methods_out if m["status"] == "success"]
+            ce.run_estimation_checks(executed)
+            ce.run_selection_checks()
+            ce.run_results_checks()
+            compliance_audit = ce.audit_log
+
         results_obj = {
             "run_id": run_id,
             "execution_id": run_id,
@@ -618,7 +628,8 @@ class ReservingEngine:
             "best_estimate": best_estimate_val,
             "selected_method": rec_code,
             "ai_recommendation": None,
-            "methods": methods_out
+            "methods": methods_out,
+            "compliance_audit": compliance_audit
         }
         
         session['results'] = results_obj
@@ -653,5 +664,6 @@ class ReservingEngine:
                 "selected_method": rec_code
             },
             "ai_recommendation": None,
-            "methods": methods_out
+            "methods": methods_out,
+            "compliance_audit": compliance_audit
         }
