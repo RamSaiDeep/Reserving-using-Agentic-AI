@@ -7,14 +7,11 @@ import concurrent.futures
 from openai import OpenAI
 import openai
 import os
-from reserving.core.triangle import Triangle
-from reserving.methods import METHODS
-from reserving.ingestion.classifier import DataClassifier
-from reserving.ingestion.inspector import DataInspector
-
-# Import Multi-Agent Supervisor
-from agents.supervisor import SupervisorAgent
-from agents.utils import run_agent as utils_run_agent
+from models.triangle import Triangle
+from models.methods import METHODS
+from models.classifier import DataClassifier
+from models.inspector import DataInspector
+from models.compliance import ComplianceEngine
 
 # Global Session Store
 SESSION_STORE = {}
@@ -34,7 +31,9 @@ def create_session(csv_text: str, n_years: int, valuation_year: int = None, api_
         'ldfs': None,
         'summary': None,
         'recommendation': None,
-        'results': None
+        'results': None,
+        'compliance_engine': ComplianceEngine(),
+        'methods_executed': set()
     }
     return session_id
 
@@ -77,6 +76,9 @@ def ingest_csv(session_id: str) -> str:
         entity_msg = ""
         if inspection.entity_check.is_multi_entity:
             entity_msg = f" Note: Detected {inspection.entity_check.entity_count} entities under '{inspection.entity_check.entity_column}'."
+            
+        # Run Ingestion Compliance Checks
+        session['compliance_engine'].run_ingestion_checks(df, inspection)
             
         return (f"Successfully parsed CSV ({len(df)} rows, {len(df.columns)} cols). "
             f"Classified as '{classification.data_type}' (Confidence: {classification.confidence})."
@@ -170,6 +172,10 @@ def build_loss_triangle(session_id: str) -> str:
                 'accumulation_states': inspection.accumulation_states
             }
         session['summary'] = summary
+        
+        # Run Summary Compliance Checks
+        session['compliance_engine'].run_summary_checks(df, t)
+        
         return f"Successfully built {t._format} format Triangle."
     except Exception as e:
         import traceback
