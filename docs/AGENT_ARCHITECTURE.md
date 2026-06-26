@@ -31,30 +31,23 @@ The package `backend/agents/` contains the following components:
   - Assesses Loss Development Factor (LDF) stability (utilizing Coefficient of Variation - COV).
   - Detects outliers.
 
-### 3. ReservingAgent (`reserving_agent.py`)
-- **Role**: Actuarial Execution Auditor.
-- **Responsibilities**:
-  - Triggers model executions on `ReservingEngine` according to configured assumptions.
-  - Audits execution outputs (verifying if runs succeeded or failed).
-  - Provides natural language descriptions of the configured assumptions and parameters used.
-
-### 4. ComparisonAgent (`comparison_agent.py`)
+### 3. ComparisonAgent (`comparison_agent.py`)
 - **Role**: Peer Analysis Specialist.
 - **Responsibilities**:
   - Compares the numerical results across all successfully executed methods.
   - Calculates deterministic reserve differences, ultimate differences, and loss ratios relative to the median.
   - Uses the LLM to explain why methods differ based on their differing structural and historical sensitivities.
 
-### 5. RecommendationAgent (`recommendation_agent.py`)
+### 4. RecommendationAgent (`recommendation_agent.py`)
 - **Role**: Best Estimate Decision Maker.
 - **Responsibilities**:
-  - Consumes inputs from the `DiagnosticsAgent`, `ReservingAgent`, and `ComparisonAgent`.
+  - Consumes inputs from the `DiagnosticsAgent` and `ComparisonAgent`.
   - Determines the recommended reserving method (e.g. Chain Ladder vs. Bornhuetter-Ferguson).
   - Assigns an actuarial confidence score (High/Medium/Low).
   - Produces a detailed justification referencing objective diagnostic findings (e.g., LDF stability, tail factors, maturity).
   - Details cautions, warning flags, and alternative methods.
 
-### 6. ReportingAgent (`reporting_agent.py`)
+### 5. ReportingAgent (`reporting_agent.py`)
 - **Role**: Actuarial Report Compiler.
 - **Responsibilities**:
   - Compiles the outputs of all preceding agents into a formal, comprehensive actuarial report in Markdown format.
@@ -71,34 +64,34 @@ The following Mermaid diagram outlines the interaction flow during model executi
 sequenceDiagram
     autonumber
     actor User as Actuary / UI
+    participant Eng as ReservingEngine (Deterministic)
     participant S as SupervisorAgent
     participant D as DiagnosticsAgent
-    participant R as ReservingAgent
     participant C as ComparisonAgent
     participant Rec as RecommendationAgent
     participant Rep as ReportingAgent
-    participant Eng as ReservingEngine (Deterministic)
 
-    User->>S: Run Execution (ExecuteRequest)
-    S->>R: Execute Models
-    R->>Eng: Run Mathematical Reserving
-    Eng-->>R: Return Reserving Results
-    R-->>S: Return Results + Narration
+    User->>Eng: Run Execution (ExecuteRequest)
+    Eng->>Eng: Fit Reserving Models (CL, BF, etc.)
+    Eng->>S: run_reserve_recommendation_agent(results_summary)
     
-    S->>D: Analyze Triangle
-    D->>Eng: Compute Diagnostics & LDFs
+    note over S,C: Parallel Execution (ThreadPoolExecutor)
+    par S to D
+        S->>D: Analyze Triangle (analyze)
+    and S to C
+        S->>C: Compare Indications (compare)
+    end
     D-->>S: Return Diagnostics Analysis
+    C-->>S: Return Indication Comparisons
     
-    S->>C: Compare Indications
-    C-->>S: Return Indication Comparisons & Explanations
+    S->>Rec: Recommend Best Estimate (recommend)
+    Rec-->>S: Return Recommendation (Confidence & trace)
     
-    S->>Rec: Recommend Best Estimate
-    Rec-->>S: Return Recommended Method, Confidence & Justification
+    S->>Rep: Compile Actuarial Report (generate_report)
+    Rep-->>S: Return Markdown Report
     
-    S->>Rep: Compile Actuarial Report
-    Rep-->>S: Return Comprehensive Markdown Report
-    
-    S-->>User: Return Session Recommendations & Report
+    S-->>Eng: Return Recommendation & Report
+    Eng-->>User: Return Consolidated Payload (Math + AI)
 ```
 
 ---
@@ -109,27 +102,24 @@ The table below outlines the specific actuarial tools and classes consumed by ea
 
 | Agent | Actuarial Tool/Library Consumed | Key Outputs |
 | :--- | :--- | :--- |
-| **SupervisorAgent** | `SESSION_STORE` | Session workflow state updates, JSON event streams |
+| **SupervisorAgent** | `SESSION_STORE` | Session workflow state updates, JSON event streams, concurrent thread orchestrations |
 | **DiagnosticsAgent** | `Triangle`, `compute_diagnostics`, `DevelopmentEngine` | Data quality flags, maturity scores, LDF stability assessment |
-| **ReservingAgent** | `ReservingEngine` | Executed method results, validation checks |
 | **ComparisonAgent** | None (Consumes Reserving results) | Relative differences, median comparisons, variation analysis |
 | **RecommendationAgent** | None (Consumes Diagnostics & Comparison outputs) | Recommended method, confidence levels, cautions, alternatives |
 | **ReportingAgent** | None (Consumes preceding outputs) | Complete Markdown actuarial report |
 
 ### Data Flow Process (Diagnostics-Driven Selection):
 
-1. **Deterministic Diagnostics**: The `DiagnosticsAgent` runs modular diagnostics (`reporting_pattern`, `ldf_stability`, `calendar_effects`, `tail_analysis`, `outliers`, and `suitability`).
-2. **Supervisor Decision Intelligence**: The `SupervisorAgent` analyzes the diagnostic outputs and makes routing decisions:
-   - **Quality Check**: Stops pipeline execution and prompts user intervention if critical quality issues are found.
-   - **Volatility Routing**: Prioritizes `MCL` (Mack) and prompts comparison against `BF` if LDF volatility is high.
-   - **Premium Dependency**: Skips and disables premium-dependent methods (`BF`, `BK`, `CC`, `ELR`) if premium is missing.
-   - **Fit Check**: Triggers warnings and lowers confidence in development methods if reporting pattern curve fit is poor.
-3. **Specialist Evaluation**:
-   - `ReservingAgent` fits eligible mathematical models.
-   - `ComparisonAgent` determines differences relative to median.
-4. **Recommendation and Trace**: `RecommendationAgent` evaluates the suitability scores and qualitative evaluations. It chooses the recommended method, and generates a deterministic `decision_trace` explaining the steps from raw diagnostics to the chosen best estimate.
-5. **Report Compilation**: `ReportingAgent` compiles the final report, integrating the trace and cautions.
-
+1. **Deterministic Diagnostics & Decisions**: The `SupervisorAgent` runs the fast, deterministic `compute_diagnostics` first to check suitability, LDF stability, and premium availability:
+   - **Quality Check**: Stops pipeline execution (ValueError) if critical quality issues are found (accident years < 3, development periods < 3, or total paid <= 0).
+   - **Volatility Routing**: Prioritizes `MCL` (Mack) and recommends comparing against `BF` if LDF volatility is high (avg CoV > 0.12).
+   - **Premium Dependency**: Filters out premium-dependent methods (`BF`, `BK`, `CC`, `ELR`) from the results list if premium is missing.
+2. **Concurrent LLM Evaluation**:
+   - `DiagnosticsAgent` and `ComparisonAgent` are triggered concurrently using a Python `ThreadPoolExecutor`.
+   - `DiagnosticsAgent` analyzes data metrics to add qualitative interpretations.
+   - `ComparisonAgent` evaluates differences relative to the median.
+3. **Recommendation and Trace**: `RecommendationAgent` evaluates the suitability scores and qualitative evaluations. It chooses the recommended method, and generates a deterministic `decision_trace` explaining the steps from raw diagnostics to the chosen best estimate.
+4. **Report Compilation**: `ReportingAgent` compiles the final report, integrating the trace and cautions.
 5. **Chat Conversation**: The generated report and diagnostics are saved in `SESSION_STORE`. When the user asks questions, the chatbot reads this context to provide responses referencing Jacqueline Friedland's methodologies.
 
 ---

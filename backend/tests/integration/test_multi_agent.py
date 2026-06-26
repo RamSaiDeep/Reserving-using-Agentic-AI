@@ -8,7 +8,6 @@ import pandas as pd
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 import agent_workflow
 from agents.diagnostics_agent import DiagnosticsAgent
-from agents.reserving_agent import ReservingAgent
 from agents.comparison_agent import ComparisonAgent
 from agents.recommendation_agent import RecommendationAgent
 from agents.reporting_agent import ReportingAgent
@@ -139,3 +138,156 @@ def test_supervisor_orchestration(sample_csv_text):
     # Verify Chat Agent
     reply = agent_workflow.run_parallel_chat(session_id, "Explain the diagnostics summary", [])
     assert reply is not None
+
+def test_deterministic_parser():
+    from agents.parser import parse_request
+    # Test greeting intent
+    parsed = parse_request("Hello, can you help me?")
+    assert parsed["intent"] == "GREETING"
+    
+    # Test out of scope
+    parsed = parse_request("Tell me a funny joke")
+    assert parsed["intent"] == "OUT_OF_SCOPE"
+    
+    # Test calculation query and methods
+    parsed = parse_request("Calculate Bornhuetter-Ferguson and Mack on incurred basis")
+    assert parsed["intent"] == "CALCULATION_QUERY"
+    assert "BF" in parsed["methods"]
+    assert "MCL" in parsed["methods"]
+    assert parsed["basis"] == "incurred"
+
+def test_execution_planner():
+    from agents.planner import create_execution_plan
+    # Planner should require dataset, results, and recommendation for recommendation query
+    parsed = {
+        "intent": "RECOMMENDATION_QUERY",
+        "methods": [],
+        "basis": None,
+        "comparison": False,
+        "recommendation": True,
+        "parameters": {}
+    }
+    plan = create_execution_plan(parsed)
+    assert plan["need_dataset"] is True
+    assert plan["need_results"] is True
+    assert plan["need_recommendation"] is True
+
+    # Planner should not need results or recommendation for greeting
+    parsed_greeting = {
+        "intent": "GREETING",
+        "methods": [],
+        "basis": None,
+        "comparison": False,
+        "recommendation": False,
+        "parameters": {}
+    }
+    plan_greeting = create_execution_plan(parsed_greeting)
+    assert plan_greeting["need_dataset"] is False
+    assert plan_greeting["need_results"] is False
+    assert plan_greeting["need_recommendation"] is False
+
+def test_stage_manager_dependencies():
+    from agents.stage_manager import StageManager
+    manager = StageManager()
+    
+    # Check that recommendation stage depends on results
+    rec_stage = manager.stages["recommendation"]
+    assert "results" in rec_stage.deps
+    
+    # Check that results stage depends on preprocessing
+    results_stage = manager.stages["results"]
+    assert "preprocessing" in results_stage.deps
+    
+    # Check that preprocessing stage depends on dataset
+    prep_stage = manager.stages["preprocessing"]
+    assert "dataset" in prep_stage.deps
+
+def test_dataset_metadata_queries_and_method_specific_execution(sample_csv_text):
+    from agents.parser import parse_request
+    from agents.planner import create_execution_plan
+    from agents.stage_manager import StageManager
+    
+    # 1. Verify Dataset Metadata Query parsing
+    queries = [
+        "How many rows does the dataset have?",
+        "What columns are present?",
+        "What variables are available?",
+        "What is the shape of the dataset?",
+        "How many accident years are there?",
+        "Are there missing values?",
+        "What entities are present?",
+        "What development periods exist?"
+    ]
+    for q in queries:
+        parsed = parse_request(q)
+        assert parsed["intent"] == "DATASET_QUERY", f"Failed for query: {q}"
+        plan = create_execution_plan(parsed)
+        assert plan["need_dataset"] is True
+        
+    # 2. Verify deterministic replies for metadata queries
+    session_id = agent_workflow.create_session(sample_csv_text, 5, api_key="mock", model_name="mock")
+    # Pre-populate session
+    agent_workflow.ingest_csv(session_id)
+    agent_workflow.perform_data_quality_checks(session_id)
+    agent_workflow.build_loss_triangle(session_id)
+    session = agent_workflow.SESSION_STORE[session_id]
+    
+    from agents.supervisor import SupervisorAgent
+    sv = SupervisorAgent()
+    
+    rep_rows = sv.answer_dataset_query(session, "How many rows does the dataset have?")
+    assert "rows" in rep_rows and "columns" in rep_rows
+    
+    rep_cols = sv.answer_dataset_query(session, "What columns are present?")
+    assert "development" in rep_cols or "paid" in rep_cols or "accident" in rep_cols
+    
+    rep_missing = sv.answer_dataset_query(session, "Are there missing values?")
+    assert "missing values" in rep_missing or "no missing values" in rep_missing.lower()
+    
+    # 3. Verify method-specific execution
+    # Case A: Chain Ladder explicitly requested
+    p_cl = parse_request("Run the Chain Ladder method")
+    assert p_cl["methods"] == ["CL"]
+    plan_cl = create_execution_plan(p_cl)
+    assert plan_cl["methods_required"] == ["CL"]
+    # Verify execution only runs CL
+    session_cl = agent_workflow.create_session(sample_csv_text, 5, api_key="mock", model_name="mock")
+    agent_workflow.ingest_csv(session_cl)
+    agent_workflow.perform_data_quality_checks(session_cl)
+    agent_workflow.build_loss_triangle(session_cl)
+    agent_workflow.calculate_ldfs(session_cl)
+    s_cl = agent_workflow.SESSION_STORE[session_cl]
+    sm = StageManager()
+    sm.ensure_stage("results", plan_cl, session_cl, s_cl, [])
+    assert "CL" in s_cl["results_by_method"]
+    assert len(s_cl["results_by_method"]) == 1
+    
+    # Case B: Mack explicitly requested
+    p_mack = parse_request("Run Mack")
+    assert p_mack["methods"] == ["MCL"]
+    plan_mack = create_execution_plan(p_mack)
+    session_mack = agent_workflow.create_session(sample_csv_text, 5, api_key="mock", model_name="mock")
+    agent_workflow.ingest_csv(session_mack)
+    agent_workflow.perform_data_quality_checks(session_mack)
+    agent_workflow.build_loss_triangle(session_mack)
+    agent_workflow.calculate_ldfs(session_mack)
+    s_mack = agent_workflow.SESSION_STORE[session_mack]
+    sm.ensure_stage("results", plan_mack, session_mack, s_mack, [])
+    assert "MCL" in s_mack["results_by_method"]
+    assert len(s_mack["results_by_method"]) == 1
+    
+    # Case C: Compare Mack and BF
+    p_comp = parse_request("Compare Mack and BF")
+    assert "MCL" in p_comp["methods"]
+    assert "BF" in p_comp["methods"]
+    plan_comp = create_execution_plan(p_comp)
+    session_comp = agent_workflow.create_session(sample_csv_text, 5, api_key="mock", model_name="mock")
+    agent_workflow.ingest_csv(session_comp)
+    agent_workflow.perform_data_quality_checks(session_comp)
+    agent_workflow.build_loss_triangle(session_comp)
+    agent_workflow.calculate_ldfs(session_comp)
+    s_comp = agent_workflow.SESSION_STORE[session_comp]
+    sm.ensure_stage("results", plan_comp, session_comp, s_comp, [])
+    assert "MCL" in s_comp["results_by_method"]
+    assert "BF" in s_comp["results_by_method"]
+    assert len(s_comp["results_by_method"]) == 2

@@ -1,1 +1,1 @@
-from .reserving import MethodConfig, ExecuteRequest
+from .reserving import MethodConfig, ExecuteRequest, RecommendationRequest

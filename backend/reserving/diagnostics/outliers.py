@@ -76,14 +76,22 @@ def analyze(triangle):
                     ay_scores[ay]["total_score"] += 2.0
                     
             if is_outlier:
+                severity_val = "Moderate" if severity == "Medium" else severity
+                ratio_val = round(float(f / mean_j), 2) if mean_j > 0 else 1.0
                 cell_outliers.append({
                     "accident_year": ay,
+                    "ay": ay,
                     "from_age": dev_ages[j],
                     "to_age": dev_ages[j+1],
+                    "lag": dev_ages[j],
                     "factor": round(float(f), 4),
+                    "value": round(float(f), 4),
                     "expected_factor": round(mean_j, 4),
+                    "median": round(mean_j, 4),
                     "z_score": round(float(z), 2),
-                    "severity": severity
+                    "ratio": ratio_val,
+                    "severity": severity_val,
+                    "reason": f"Age-to-age factor {f:.4f} deviates from column average of {mean_j:.4f} (Z-score: {z:.2f})"
                 })
                 
     # Rank accident years by total outlier score

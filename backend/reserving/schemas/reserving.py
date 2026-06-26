@@ -38,3 +38,9 @@ class ExecuteRequest(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model_name: Optional[str] = None
+
+class RecommendationRequest(BaseModel):
+    execution_id: str
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model_name: Optional[str] = None

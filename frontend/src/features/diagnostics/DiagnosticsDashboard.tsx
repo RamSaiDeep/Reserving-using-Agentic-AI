@@ -103,7 +103,7 @@ export default function DiagnosticsDashboard({ diagnostics, isLoading = false }:
             </h4>
           </div>
           <div className="mt-4 text-[11px] text-text-sub">
-            Avg CoV: <span className="font-mono font-bold text-accent">{(stab.average_cov || 0).toFixed(3)}</span>
+            Avg CoV: <span className="font-mono font-bold text-accent">{stab?.average_cov != null ? Number(stab.average_cov).toFixed(3) : "0.000"}</span>
           </div>
         </div>
 
@@ -116,7 +116,7 @@ export default function DiagnosticsDashboard({ diagnostics, isLoading = false }:
             </h4>
           </div>
           <div className="mt-4 text-[11px] text-text-sub">
-            R²: <span className="font-mono font-bold text-accent">{rep.fit_metrics?.r2 ? rep.fit_metrics.r2.toFixed(3) : "N/A"}</span>
+            R²: <span className="font-mono font-bold text-accent">{rep?.fit_metrics?.r2 != null ? Number(rep.fit_metrics.r2).toFixed(3) : "N/A"}</span>
           </div>
         </div>
 
@@ -129,7 +129,7 @@ export default function DiagnosticsDashboard({ diagnostics, isLoading = false }:
             </h4>
           </div>
           <div className="mt-4 text-[11px] text-text-sub">
-            Slope: <span className="font-mono font-bold text-accent">{(cal.slope || 0).toFixed(4)}</span>
+            Slope: <span className="font-mono font-bold text-accent">{cal?.slope != null ? Number(cal.slope).toFixed(4) : "0.0000"}</span>
           </div>
         </div>
 
@@ -147,7 +147,7 @@ export default function DiagnosticsDashboard({ diagnostics, isLoading = false }:
             </h4>
           </div>
           <div className="mt-4 text-[11px] text-text-sub">
-            Selected vs High: <span className="font-mono text-accent">{(tail.selected_tail || 1.0).toFixed(3)}</span> vs <span className="font-mono text-text-muted">{(tail.high_tail || 1.0).toFixed(3)}</span>
+            Selected vs High: <span className="font-mono text-accent">{tail?.selected_tail != null ? Number(tail.selected_tail).toFixed(3) : "1.000"}</span> vs <span className="font-mono text-text-muted">{tail?.high_tail != null ? Number(tail.high_tail).toFixed(3) : "1.000"}</span>
           </div>
         </div>
 
@@ -238,26 +238,36 @@ export default function DiagnosticsDashboard({ diagnostics, isLoading = false }:
             </h3>
             {out.cell_outliers && out.cell_outliers.length > 0 ? (
               <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-                {out.cell_outliers.map((c, i) => (
-                  <div key={i} className="border border-border rounded-lg p-3 bg-bg-2 relative">
-                    <span className={`absolute top-2.5 right-2.5 text-[8.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                      c.severity === 'Critical' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                      c.severity === 'High' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                      'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                    }`}>
-                      {c.severity}
-                    </span>
-                    <div className="text-[10px] font-mono text-text-muted mb-1">
-                      AY {c.ay} | Dev Lag {c.lag}
+                {out.cell_outliers.map((c, i) => {
+                  const ay = c.ay ?? (c as any).accident_year;
+                  const lag = c.lag ?? (c as any).from_age;
+                  const val = c.value ?? (c as any).factor;
+                  const med = c.median ?? (c as any).expected_factor;
+                  const ratio = c.ratio !== undefined ? c.ratio : (val != null && med != null && med !== 0 ? val / med : 1.0);
+                  const severity = (c.severity as any) === 'Medium' ? 'Moderate' : (c.severity || 'Low');
+                  const reason = c.reason || `Age-to-age factor ${val != null ? Number(val).toFixed(4) : "—"} deviates from average of ${med != null ? Number(med).toFixed(4) : "—"}.`;
+
+                  return (
+                    <div key={i} className="border border-border rounded-lg p-3 bg-bg-2 relative">
+                      <span className={`absolute top-2.5 right-2.5 text-[8.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                        severity === 'Critical' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                        severity === 'High' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                        'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                      }`}>
+                        {severity}
+                      </span>
+                      <div className="text-[10px] font-mono text-text-muted mb-1">
+                        AY {ay} | Dev Lag {lag}
+                      </div>
+                      <div className="text-[11.5px] font-semibold text-text-main">
+                        Value: <span className="font-mono text-accent">{val != null ? Number(val).toFixed(4) : '—'}</span>
+                      </div>
+                      <div className="text-[10px] text-text-sub mt-1 leading-normal">
+                        {reason} (Ratio: {ratio != null && !isNaN(Number(ratio)) ? Number(ratio).toFixed(2) : '1.00'}x median)
+                      </div>
                     </div>
-                    <div className="text-[11.5px] font-semibold text-text-main">
-                      Value: <span className="font-mono text-accent">{fmtShort(c.value)}</span>
-                    </div>
-                    <div className="text-[10px] text-text-sub mt-1 leading-normal">
-                      {c.reason} (Ratio: {c.ratio.toFixed(2)}x median)
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="text-[11px] text-text-muted font-mono h-32 flex items-center justify-center">
@@ -286,7 +296,7 @@ export default function DiagnosticsDashboard({ diagnostics, isLoading = false }:
               {cal.trend_detected && (
                 <li className="flex items-start gap-2 text-accent-amber">
                   <span className="font-bold">⚠️</span>
-                  <span>Detected calendar year inflation effect (Slope: {cal.slope?.toFixed(4)}).</span>
+                  <span>Detected calendar year inflation effect (Slope: {cal?.slope != null ? Number(cal.slope).toFixed(4) : "0.0000"}).</span>
                 </li>
               )}
               {rep.significant_deviations && rep.significant_deviations.length > 0 && (

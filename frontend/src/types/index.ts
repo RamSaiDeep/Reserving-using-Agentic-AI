@@ -123,7 +123,9 @@ export interface MethodResultItem {
   code?: string;
   name?: string;
   paid?: number;
+  reported?: number;
   case_outstanding?: number;
+  reserve?: number;
   loss_ratio?: number;
   cv?: number;
   reserve_to_case_ratio?: number;

@@ -1,0 +1,17 @@
+{
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "pythonPath": "C:/Users/vrams/AppData/Local/Programs/Python/Python311/python.exe",
+  "venvPath": "C:/Users/vrams/AppData/Local/Programs/Python/Python311",
+  "include": [
+    "backend"
+  ],
+  "exclude": [
+    "frontend",
+    "**/__pycache__",
+    "**/.pytest_cache"
+  ],
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "typeCheckingMode": "basic"
+}

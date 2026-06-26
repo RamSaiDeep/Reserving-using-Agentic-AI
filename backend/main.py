@@ -29,7 +29,7 @@ app.add_middleware(
 def read_root():
     return {"status": "healthy", "message": "Agentic Actuarial Reserving Backend is running"}
 
-from reserving.schemas import MethodConfig, ExecuteRequest
+from reserving.schemas import MethodConfig, ExecuteRequest, RecommendationRequest
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -204,184 +204,8 @@ async def update_mappings(req: UpdateMappingsRequest):
 @app.post("/api/execute")
 async def execute_model(req: ExecuteRequest):
     try:
-        session = agent_workflow.SESSION_STORE.get(req.session_id)
-        if not session:
-            return {"success": False, "error": "Invalid session_id"}
-
-        session['params'] = req.params
-        session['custom_ldfs'] = req.custom_ldfs
-        if req.api_key: session['api_key'] = req.api_key
-        if req.base_url: session['base_url'] = req.base_url
-        if req.model_name: session['model_name'] = req.model_name
-
-        from reserving.methods import METHODS
-        from reserving.core.tools import (get_environment_sensitivity, compute_ibnr_table,
-                                           compute_loss_ratios, suggest_elr,
-                                           compute_ldf_stability, compute_tail_factor)
-
-        MethodClass = METHODS.get(req.method_code)
-        if not MethodClass:
-            return {"success": False, "error": "Invalid method code"}
-
-        if MethodClass.needs_premium and not session['triangle'].premiums:
-            error_msg = (f"Data Input Insufficient: The {MethodClass.label} model requires "
-                         f"Premium data, which was not found in your dataset. Please choose a different model.")
-            session['report'] = error_msg
-            return {"success": True, "results": [], "totalIBNR": 0, "totalUlt": 0, "totalPaid": 0, "narration": error_msg}
-
-        import copy
-        t_eval = copy.deepcopy(session['triangle'])
-
-        # Determine LDFs and matrix based on Selected Data Source
-        data_source = req.data_source or "paid"
-        ldfs_to_use = req.custom_ldfs
-        
-        if data_source == "incurred":
-            t_eval.matrix = t_eval.incurred_matrix
-            t_eval.data_type = "incurred"
-            if req.custom_incurred_ldfs:
-                ldfs_to_use = req.custom_incurred_ldfs
-
-        # ── On-Level Premium (if rate changes provided) ───────────────────────
-        olf_note = ""
-        if req.rate_changes and t_eval.premiums:
-            try:
-                import pandas as pd
-                from reserving.core.on_level import OnLevelPremiumCalculator
-                prem_data = [{"accident_year": int(ay), "earned_premium": float(p)} for ay, p in t_eval.premiums.items()]
-                calc = OnLevelPremiumCalculator(pd.DataFrame(prem_data), pd.DataFrame(req.rate_changes))
-                on_level_df = calc.calculate()
-                t_eval.premiums = dict(zip(on_level_df["accident_year"], on_level_df["on_level_premium"]))
-                olf_note = "Premiums were adjusted to current rate levels using On-Level Factors (OLF) before projection."
-            except Exception as e:
-                return {"success": False, "error": f"On-Leveling error: {str(e)}"}
-
-        # ── TOOL: Tail Factor (deterministic) ─────────────────────────────────
-        tail_result = compute_tail_factor(ldfs_to_use, t_eval)
-        chosen_tail   = tail_result["chosen"]
-        chosen_reason = tail_result["reason"]
-        if ldfs_to_use[-1] == 1.0:
-            ldfs_to_use[-1] = chosen_tail
-        else:
-            chosen_reason = f"User Manual Override ({ldfs_to_use[-1]})"
-
-        # ── Run Model ─────────────────────────────────────────────────────────
-        model = MethodClass()
-        model.fit(t_eval, req.params, ldfs_to_use)
-
-        diag       = t_eval.get_latest_diagonal()
-        total_paid = sum(v for v in diag if v is not None)
-
-        # ── TOOL: IBNR Table (deterministic) ──────────────────────────────────
-        ibnr_table = compute_ibnr_table(t_eval, model, ldfs_to_use)
-
-        # ── TOOL: Loss Ratios (deterministic, only if premium) ────────────────
-        loss_ratios = compute_loss_ratios(t_eval, ibnr_table) if t_eval.premiums else []
-
-        # ── TOOL: Suggested ELR (deterministic) ───────────────────────────────
-        elr_suggestion = suggest_elr(t_eval)
-
-        # ── TOOL: LDF Stability Diagnostics (deterministic) ───────────────────
-        ldf_stability  = compute_ldf_stability(t_eval)
-
-        # ── TOOL: Environment Sensitivity (deterministic lookup) ──────────────
-        env_sensitivity = get_environment_sensitivity(req.method_code)
-
-        # ── PROCESS descriptions (static strings — no LLM needed) ────────────
-        PROCESS_EXPLANATIONS = {
-            "CL":  "Chain Ladder projects ultimate claims by multiplying the latest paid diagonal by Cumulative Development Factors (CDFs) derived from historical age-to-age LDFs. IBNR = Ultimate − Paid.",
-            "MCL": "Mack Chain Ladder calculates identical ultimates to CL but additionally computes sigma-squared variance for each column, producing standard errors and confidence intervals (75th/95th percentile) around the IBNR estimate.",
-            "BF":  "Bornhuetter-Ferguson splits the IBNR into (a) expected unreported claims = Expected Ultimate × (1 − 1/CDF), plus (b) actual paid to date. Expected Ultimate = Premium × A Priori ELR.",
-            "CC":  "Cape Cod derives the ELR automatically from actual data: ELR = Σ(Reported Claims) / Σ(Used-Up Premium). Used-Up Premium = Earned Premium × % Reported (1/CDF). IBNR is then computed identically to BF.",
-            "BK":  "Benktander iteratively refines the BF estimate: BF Ultimate is fed back as the new A Priori, and IBNR is recomputed. Each iteration shifts credibility from BF toward Chain Ladder proportional to % reported.",
-            "CO":  "Case Outstanding method sets IBNR = total case reserves currently held by adjusters. It assumes zero future newly-reported claims. Reserve = Incurred − Paid = Case Reserves.",
-            "CLK": "Clark Stochastic fits a continuous growth curve (Log-Logistic or Weibull) to the paid triangle using maximum likelihood. Stabilised CDFs from the curve are applied to project ultimates with a distribution of outcomes.",
-            "FS":  "Frequency-Severity Method implements Chapter 11 techniques, projecting ultimate claims count and ultimate average severity separately (or using disposal and frequency rates) to compute reserves."
-        }
-
-        # ── Deterministic Report Generation (No Tokens Used) ──────────────────
-        inputs_txt = f"Data used: {len(t_eval.accident_years)} accident years, evaluated to {max(t_eval.dev_ages)} months."
-        if session['triangle'].premiums:
-            inputs_txt += " Premium data was included."
-            
-        process_txt = PROCESS_EXPLANATIONS.get(req.method_code, "")
-        if olf_note:
-            process_txt += f" {olf_note}"
-            
-        output_txt = f"The model projected a Total IBNR of {round(model.get_total_ibnr(), 0):,.0f} and a Total Ultimate of {round(model.get_total_ultimate(), 0):,.0f}."
-        
-        ldf_txt = "LDFs were mathematically computed. "
-        if ldf_stability:
-            ldf_txt += f"Overall stability is based on {len(ldf_stability)} development periods. "
-            
-        impact_txt = "Premium and exposure changes directly scale the A Priori ELR and Expected Ultimates in this model." if session['triangle'].premiums else "No premium or exposure data used in this model."
-        if req.method_code in ['CL', 'MCL', 'CO', 'CLK']:
-            impact_txt = "This method relies purely on historical development patterns, meaning premium/exposure changes do not impact the projection."
-
-        parsed = {
-            "inputs": inputs_txt,
-            "process": process_txt,
-            "output_text": output_txt,
-            "ldf_analysis": ldf_txt,
-            "tail_factor_selection": f"Selected tail factor: {chosen_reason}.",
-            "impact": impact_txt
-        }
-
-        parsed["environment_sensitivity"] = env_sensitivity
-        parsed["output_numbers"] = {"Total IBNR": round(model.get_total_ibnr(), 0), "Total Ultimate": round(model.get_total_ultimate(), 0)}
-        parsed["loss_ratios"] = loss_ratios
-        parsed["suggested_elr"] = elr_suggestion
-
-        final_msg = json.dumps(parsed)
-        session['report'] = final_msg
-
-        # ── Store results & Standardize ───────────────────────────────────────
-        cdfs_curve = t_eval.compute_cdfs(req.custom_ldfs)
-        
-        from reserving.core.standardizer import standardize_method_output
-        std_out = standardize_method_output(
-            code=req.method_code,
-            label=MethodClass.label,
-            source_val=data_source,
-            t_eval=t_eval,
-            model=model,
-            configs={req.method_code: req}
-        )
-
-        session['results'] = std_out['results']
-        session['total_ultimate'] = std_out['ultimate']
-        session['total_ibnr'] = std_out['ibnr']
-        session['volatility'] = getattr(model, 'volatility', None)
-        session['cdfs']      = cdfs_curve
-        session['ldfs']      = req.custom_ldfs
-        session['dev_ages']  = t_eval.dev_ages
-        session['totalIBNR'] = std_out['ibnr']
-        session['totalUlt']  = std_out['ultimate']
-        
-        # Store diagnostics for Analysis Agent
-        session['loss_ratios'] = loss_ratios
-        session['suggested_elr'] = elr_suggestion
-        session['ldf_stability'] = ldf_stability
-        session['volatility'] = getattr(model, 'volatility', 0)
-        session['ratio_triangles'] = getattr(model, 'ratio_triangles', None) # If available
-        session['curve_fitting_results'] = getattr(model, 'curve_fitting_results', None) # If available
-
-        return {
-            "success":   True,
-            "results":   std_out['results'],
-            "totalIBNR": std_out['ibnr'],
-            "totalUlt":  std_out['ultimate'],
-            "totalPaid": std_out['paid'],
-            "narration": final_msg,
-            "cdfs":      cdfs_curve,
-            "ldfs":      req.custom_ldfs,
-            "dev_ages":  t_eval.dev_ages,
-            "loss_ratios":   loss_ratios,
-            "suggested_elr": elr_suggestion,
-            "ldf_stability": ldf_stability,
-            "volatility":    session.get('volatility', 0),
-            **std_out
-        }
+        from reserving.services import ReservingEngine
+        return ReservingEngine.execute_single_model(req)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -421,6 +245,97 @@ async def execute_all_models(req: ExecuteRequest):
         traceback.print_exc()
         return {"success": False, "error": str(e)}
 
+@app.post("/api/recommendation")
+async def get_recommendation(req: RecommendationRequest):
+    try:
+        session = None
+        session_id = None
+        for sid, s in agent_workflow.SESSION_STORE.items():
+            if 'executions' in s and req.execution_id in s['executions']:
+                session = s
+                session_id = sid
+                break
+                
+        if not session:
+            for sid, s in agent_workflow.SESSION_STORE.items():
+                res = s.get('results')
+                if res and res.get('run_id') == req.execution_id:
+                    session = s
+                    session_id = sid
+                    break
+                    
+        if not session:
+            return {"success": False, "error": f"Execution {req.execution_id} not found."}
+            
+        exec_data = session['executions'].get(req.execution_id) if 'executions' in session else None
+        if not exec_data:
+            exec_data = session.get('results')
+            
+        if not exec_data:
+            return {"success": False, "error": "Execution results not found."}
+            
+        if exec_data.get('ai_recommendation') is not None:
+            return {
+                "success": True,
+                "ai_recommendation": exec_data['ai_recommendation'],
+                "report_markdown": session.get('report_markdown')
+            }
+            
+        api_key = req.api_key or session.get('api_key') or os.environ.get("LLM_API_KEY")
+        base_url = req.base_url or session.get('base_url') or os.environ.get("LLM_BASE_URL")
+        model_name = req.model_name or session.get('model_name') or os.environ.get("LLM_MODEL_NAME")
+        
+        if not api_key or not model_name:
+            return {"success": False, "error": "AI settings are missing or incomplete. Please configure your LLM API Key and Model Name in the Settings panel."}
+            
+        if req.api_key: session['api_key'] = req.api_key
+        if req.base_url: session['base_url'] = req.base_url
+        if req.model_name: session['model_name'] = req.model_name
+        
+        methods_out = exec_data.get('methods') or []
+        results_summary_for_ai = [
+            {
+                "code": m["code"],
+                "name": m["name"],
+                "status": m["status"],
+                "ibnr": m.get("ibnr", 0.0),
+                "ultimate": m.get("ultimate", 0.0),
+                "loss_ratio": m.get("loss_ratio", 0.0),
+                "maturity_score": m.get("maturity_score", 0.0),
+                "reserve_to_case_ratio": m.get("reserve_to_case_ratio", 0.0)
+            } for m in methods_out if m["status"] == "success"
+        ]
+        
+        ai_recommendation = agent_workflow.run_reserve_recommendation_agent(session_id, results_summary_for_ai)
+        
+        exec_data['ai_recommendation'] = ai_recommendation
+        if session.get('results') and session['results'].get('run_id') == req.execution_id:
+            session['results']['ai_recommendation'] = ai_recommendation
+            
+        rec_code = ai_recommendation.get("recommended_method", "CL")
+        rec_model_res = next((m for m in methods_out if m.get('code') == rec_code and m.get('status') == 'success'), None)
+        if rec_model_res:
+            exec_data['best_estimate'] = rec_model_res["ultimate"]
+            exec_data['selected_method'] = rec_code
+            if session.get('results') and session['results'].get('run_id') == req.execution_id:
+                session['results']['best_estimate'] = rec_model_res["ultimate"]
+                session['results']['selected_method'] = rec_code
+            
+            session['totalIBNR'] = rec_model_res.get('ibnr', 0.0)
+            session['totalUlt'] = rec_model_res.get('ultimate')
+            session['total_ibnr'] = session['totalIBNR']
+            session['total_ultimate'] = session['totalUlt']
+            
+        return {
+            "success": True,
+            "ai_recommendation": ai_recommendation,
+            "report_markdown": session.get('report_markdown')
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
 @app.post("/api/recalculate_suggestions")
 async def recalculate_suggestions(req: RecalculateSuggestionsRequest):
     try:
@@ -451,11 +366,40 @@ async def export_data(session_id: str):
         triangle = session.get('triangle')
         if not triangle: return JSONResponse(status_code=400, content={"error": "No triangle data"})
         
+        # Determine active data source basis from session
+        data_source = session.get('data_source', 'paid')
+        
+        # Diagnostics should use the explicitly selected matrix without mutating the original Triangle object
+        import copy
+        t_diag = copy.deepcopy(triangle)
+        if data_source == "incurred":
+            t_diag.matrix = t_diag.incurred_matrix
+            t_diag.data_type = "incurred"
+            
         try:
             from reserving.diagnostics import compute_diagnostics
-            diag_metrics = compute_diagnostics(triangle)
+            diag_metrics = compute_diagnostics(t_diag)
         except Exception:
             diag_metrics = {}
+
+        # Export already-computed results stored during execution to guarantee consistency
+        results_val = session.get('results') or {}
+        active_method = results_val.get('selected_method')
+        methods = results_val.get('methods') or []
+        method_res = next((m for m in methods if m.get('code') == active_method), None)
+        
+        # Default fallbacks
+        selected_ldfs = session.get('incurred_ldfs' if data_source == "incurred" else 'ldfs')
+        total_ibnr_selected = session.get('totalIBNR')
+        total_ultimate_selected = session.get('totalUlt')
+        
+        if method_res:
+            total_ibnr_selected = method_res.get('ibnr', total_ibnr_selected)
+            total_ultimate_selected = method_res.get('ultimate', total_ultimate_selected)
+            if data_source == "incurred":
+                selected_ldfs = results_val.get('incurred_ldfs') or selected_ldfs
+            else:
+                selected_ldfs = results_val.get('paid_ldfs') or selected_ldfs
 
         export_obj = {
             "currency": "USD",
@@ -469,9 +413,9 @@ async def export_data(session_id: str):
             "reported_claim_counts": getattr(triangle, 'reported_counts_matrix', None),
             "earned_premiums": triangle.premiums,
             "exposures": triangle.exposures,
-            "selected_ldfs": session.get('ldfs'),
-            "total_ibnr_selected": session.get('totalIBNR'),
-            "total_ultimate_selected": session.get('totalUlt'),
+            "selected_ldfs": selected_ldfs,
+            "total_ibnr_selected": total_ibnr_selected,
+            "total_ultimate_selected": total_ultimate_selected,
             "diagnostics": diag_metrics
         }
         

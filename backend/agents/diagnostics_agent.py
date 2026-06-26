@@ -3,6 +3,7 @@ from reserving.core.triangle import Triangle
 from reserving.diagnostics.diagnostics import compute_diagnostics
 from reserving.core.development_engine import DevelopmentEngine
 from agents.utils import run_agent, parse_json_response
+from agents.prompt_builders import DiagnosticsPromptBuilder
 
 class DiagnosticsAgent:
     """
@@ -36,31 +37,20 @@ class DiagnosticsAgent:
             duplicates = int(df.duplicated().sum())
             dq_status = f"Rows: {len(df)}, Columns: {len(df.columns)}, Missing values: {missing}, Duplicates: {duplicates}."
 
-        # 3. Prompt the LLM
-        sys_inst = (
-            "You are an expert actuarial diagnostics agent. Your task is to analyze loss reserving data "
-            "and provide professional reasoning for data quality, reporting patterns, LDF stability, "
-            "outliers, and maturity. Do not perform any actuarial calculations yourself. "
-            "Provide your findings in strict JSON format with the following keys:\n"
-            "1. 'data_quality_assessment': evaluation of the data completeness and quality.\n"
-            "2. 'reporting_pattern_diagnostics': description of how reporting patterns develop over time.\n"
-            "3. 'ldf_stability_assessment': evaluation of LDF stability (reference COV, straight avg vs weighted).\n"
-            "4. 'outlier_detection': identification of any anomalous accident years or cells.\n"
-            "5. 'maturity_assessment': assessment of the triangle's overall maturity.\n"
-            "Respond ONLY with the raw JSON string. Do not include markdown formatting."
-        )
-        
-        prompt = (
-            f"Actuarial Metrics Summary:\n"
-            f"Overall Statistics: {overall}\n"
-            f"LDF Diagnostics (first few): {ldf_diag[:5]}\n"
-            f"Loss Ratios by Accident Year: {loss_ratios}\n"
-            f"Data Quality Status: {dq_status}\n\n"
-            "Based on these metrics, provide the assessments requested in the JSON schema."
-        )
+        # 3. Build prompt context and render
+        context = DiagnosticsPromptBuilder.build_context(overall, ldf_diag, loss_ratios, dq_status)
+        sys_inst, prompt, sections = DiagnosticsPromptBuilder.render(context)
         
         try:
-            raw_response = run_agent(self.api_key, self.base_url, self.model_name, sys_inst, prompt)
+            raw_response = run_agent(
+                self.api_key, 
+                self.base_url, 
+                self.model_name, 
+                sys_inst, 
+                prompt,
+                agent_name="DiagnosticsAgent",
+                sections=sections
+            )
             llm_assessments = parse_json_response(raw_response)
         except Exception as e:
             llm_assessments = {

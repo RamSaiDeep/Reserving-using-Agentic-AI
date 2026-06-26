@@ -1,5 +1,6 @@
 import numpy as np
 from agents.utils import run_agent, parse_json_response
+from agents.prompt_builders import ComparisonPromptBuilder
 
 class ComparisonAgent:
     """
@@ -41,6 +42,7 @@ class ComparisonAgent:
             })
 
         # Calculate differences relative to median
+        images = None
         ultimates = [c["ultimate"] for c in comparison_table if c["ultimate"] is not None]
         median_ultimate = float(np.median(ultimates)) if ultimates else 0.0
         
@@ -60,25 +62,20 @@ class ComparisonAgent:
                 "ibnr_pct_diff_vs_median": (ibnr_diff / median_ibnr * 100) if median_ibnr > 0 else 0.0,
             }
 
-        # 2. Use LLM to explain why the methods differ
-        sys_inst = (
-            "You are an expert actuarial comparison analyst. Your job is to compare reserving indications "
-            "across different methods (e.g., Bornhuetter-Ferguson, Chain Ladder, Benktander, Cape Cod) "
-            "and explain why they differ. Focus on: structural differences (BF uses an a priori ELR and does "
-            "not react to early claims; CL is highly sensitive to recent claims; Benktander is a blend). "
-            "Be actuarially precise and concise. Do not make up calculations."
-        )
-
-        prompt = (
-            f"Reserving Indications Comparison:\n"
-            f"Median Ultimate: {median_ultimate:,.2f} | Median IBNR: {median_ibnr:,.2f}\n"
-            f"Methods Table: {comparison_table}\n"
-            f"Differences Table: {differences}\n\n"
-            "Explain why these methods differ, and how their varying sensitivities to assumptions (e.g. prior ELR, LDFs) explain the differences."
-        )
+        # 2. Use LLM to explain why the methods differ (separated context and rendering)
+        context = ComparisonPromptBuilder.build_context(median_ultimate, median_ibnr, comparison_table, differences)
+        sys_inst, prompt, sections = ComparisonPromptBuilder.render(context)
 
         try:
-            explanation = run_agent(self.api_key, self.base_url, self.model_name, sys_inst, prompt)
+            explanation = run_agent(
+                self.api_key, 
+                self.base_url, 
+                self.model_name, 
+                sys_inst, 
+                prompt,
+                agent_name="ComparisonAgent",
+                sections=sections
+            )
         except Exception as e:
             explanation = f"Failed to generate LLM comparison explanation: {str(e)}"
 

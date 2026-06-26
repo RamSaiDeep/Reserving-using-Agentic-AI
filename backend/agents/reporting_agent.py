@@ -1,5 +1,6 @@
 import datetime
 from agents.utils import run_agent
+from agents.prompt_builders import ReportingPromptBuilder
 
 class ReportingAgent:
     """
@@ -18,29 +19,29 @@ class ReportingAgent:
         self.model_name = model_name
 
     def generate_report(self, diagnostics: dict, reserving_results: dict, comparison_results: dict, recommendation: dict) -> dict:
-        """Compiles a comprehensive actuarial report in markdown format."""
-        sys_inst = (
-            "You are an expert actuarial reporting agent. Your task is to compile a formal, professional "
-            "actuarial report in Markdown format. The report should be comprehensive and suitable for PDF generation later. "
-            "Your output must contain these five distinct sections:\n"
-            "1. Executive Summary\n"
-            "2. Actuarial Report (Methodology, indications, and differences explanation)\n"
-            "3. Assumption Summary (tail factors, LDFs, ELR, and negative IBNR configurations)\n"
-            "4. Diagnostics Summary (data quality, outliers, stability, maturity)\n"
-            "5. Recommendation Summary (method, confidence, reasoning, cautions, and alternatives)\n\n"
-            "Use formal professional actuarial language. Do not invent calculations. Represent all figures cleanly."
+        """Compiles a comprehensive actuarial report in markdown format using structured prompt builder."""
+        
+        # Build prompt context and render (separating construction and template rendering)
+        context = ReportingPromptBuilder.build_context(
+            diagnostics_summary=diagnostics,
+            reserving_outputs=reserving_results,
+            comparison_table=comparison_results.get("comparison_table", []),
+            differences=comparison_results.get("differences", {}),
+            comparison_explanation=comparison_results.get("explanation", ""),
+            recommendation=recommendation
         )
-
-        prompt = (
-            f"Diagnostics: {diagnostics}\n"
-            f"Reserving Results: {reserving_results}\n"
-            f"Comparison: {comparison_results}\n"
-            f"Recommendation: {recommendation}\n\n"
-            "Compile the complete Markdown actuarial report."
-        )
+        sys_inst, prompt, sections = ReportingPromptBuilder.render(context)
 
         try:
-            report_md = run_agent(self.api_key, self.base_url, self.model_name, sys_inst, prompt)
+            report_md = run_agent(
+                self.api_key, 
+                self.base_url, 
+                self.model_name, 
+                sys_inst, 
+                prompt,
+                agent_name="ReportingAgent",
+                sections=sections
+            )
         except Exception as e:
             report_md = (
                 f"# Actuarial Reserving Report (Bypass)\n\n"

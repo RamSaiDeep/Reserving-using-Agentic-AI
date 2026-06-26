@@ -211,33 +211,7 @@ def analyze_exposures_and_premiums(session_id: str) -> str:
     except Exception as e:
         return f"Failed to analyze premiums: {str(e)}"
 
-def run_actuarial_model(session_id: str, method_code: str) -> str:
-    """Tool for Agent 6: Executes a specific mathematical reserving model (e.g. BF, CL, MCL, CC, BK, CO, CLK)."""
-    session = SESSION_STORE.get(session_id)
-    if not session or session['triangle'] is None: return "Error: Triangle not found."
-    
-    try:
-        MethodClass = METHODS.get(method_code)
-        if not MethodClass: return f"Error: Invalid method code {method_code}."
-        
-        t = session['triangle']
-        ldfs_to_use = [f['volumeWeighted'] for f in session['ldfs'][:-1]] + [1.0]
-        
-        model = MethodClass()
-        params = session.get('params', {})
-        model.fit(t, params, ldfs_to_use)
-        
-        total_ibnr = model.get_total_ibnr()
-        total_ult = model.get_total_ultimate()
-        
-        session['results'] = {
-            'method': method_code,
-            'totalIBNR': total_ibnr,
-            'totalUlt': total_ult
-        }
-        return f"Executed {method_code}. Total IBNR calculated: {total_ibnr:.2f}."
-    except Exception as e:
-        return f"Failed to run model {method_code}: {str(e)}"
+
 
 def compute_recommender_matrix(business_context: str, has_premium: bool, n_years: int = None) -> tuple[str, str]:
     scores = {

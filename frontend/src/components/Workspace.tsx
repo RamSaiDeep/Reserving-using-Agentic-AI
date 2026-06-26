@@ -70,6 +70,9 @@ export default function Workspace() {
   const [suggestedElrIncurred, setSuggestedElrIncurred] = useState<number | null>(65.0);
   const [suggestedMatureYears, setSuggestedMatureYears] = useState<number[]>([]);
   const [matureCdfThreshold, setMatureCdfThreshold] = useState<number>(1.05);
+  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
+  const [aiLoadingStep, setAiLoadingStep] = useState<number>(0);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // Settings
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -102,18 +105,18 @@ export default function Workspace() {
     if (triangle) {
       const elrPaid = triangle.suggested_elr_paid !== undefined ? triangle.suggested_elr_paid : 65.0;
       const elrInc = triangle.suggested_elr_incurred !== undefined ? triangle.suggested_elr_incurred : 65.0;
-      
+
       setSuggestedElrPaid(elrPaid);
       setSuggestedElrIncurred(elrInc);
       setSuggestedMatureYears(triangle.suggested_mature_years || []);
 
       setConfigs((prev) => {
         const nextConfigs = { ...prev };
-        
+
         const codes = Object.keys(nextConfigs);
         for (const code of codes) {
           const methodConfig = { ...(nextConfigs[code] || { enabled: true }) };
-          
+
           if (triangle.method_availability && triangle.method_availability[code]) {
             methodConfig.enabled = triangle.method_availability[code].available;
           } else if (['BF', 'BK', 'CC', 'ELR'].includes(code)) {
@@ -123,7 +126,7 @@ export default function Workspace() {
           if (code === 'BF' || code === 'BK' || code === 'ELR') {
             const appropriateElr = dataSource === 'paid' ? elrPaid : elrInc;
             methodConfig.aprioriLossRatio = methodConfig.aprioriLossRatio !== null && methodConfig.aprioriLossRatio !== undefined
-              ? methodConfig.aprioriLossRatio 
+              ? methodConfig.aprioriLossRatio
               : appropriateElr;
           }
 
@@ -214,12 +217,19 @@ export default function Workspace() {
 
   const getApiUrl = (endpoint: string) => {
     if (typeof window !== 'undefined') {
+      const hn = window.location.hostname;
       const isLocal =
-        window.location.hostname === 'localhost' ||
-        window.location.hostname === '127.0.0.1';
+        hn === 'localhost' ||
+        hn === '127.0.0.1' ||
+        hn === '[::1]' ||
+        hn === '0.0.0.0' ||
+        hn.startsWith('192.168.') ||
+        hn.startsWith('10.') ||
+        hn.startsWith('172.') ||
+        hn.endsWith('.local');
       const base = isLocal
         ? 'http://localhost:8000/api'
-        : process.env.NEXT_PUBLIC_API_URL || 'https://reserving-using-agentic-ai-iaq0.onrender.com/api';
+        : process.env.NEXT_PUBLIC_API_URL;
       return `${base}/${endpoint}`;
     }
     return `/api/${endpoint}`;
@@ -261,12 +271,12 @@ export default function Workspace() {
             setRecommendation(msg.recommendation);
             setCustomLDFs([]);
             setCustomIncurredLDFs([]);
-            
+
             // Build initial ranked list mapping
             if (msg.triangle) {
               setupRankedMethods(msg.triangle);
             }
-            
+
             // Auto switch to dataset view
             setActiveTab('dataset');
 
@@ -436,10 +446,66 @@ export default function Workspace() {
     }
   };
 
+  const fetchAiRecommendation = async (execId: string) => {
+    setIsAiLoading(true);
+    setAiError(null);
+    setAiLoadingStep(1); // Math reserving completed
+
+    const stepIntervals = [
+      setTimeout(() => setAiLoadingStep(2), 600),   // Comparing reserving methods
+      setTimeout(() => setAiLoadingStep(3), 2000),  // AI reviewing diagnostics
+      setTimeout(() => setAiLoadingStep(4), 5000),  // Preparing recommendation
+    ];
+
+    try {
+      const res = await fetch(getApiUrl('recommendation'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          execution_id: execId,
+          api_key: apiKey,
+          base_url: baseUrl,
+          model_name: modelName,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      stepIntervals.forEach(clearTimeout);
+
+      setExecuteResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              ai_recommendation: data.ai_recommendation,
+              summary: {
+                best_estimate: data.ai_recommendation?.best_estimate || prev.summary?.best_estimate,
+                selected_method: data.ai_recommendation?.recommended_method || prev.summary?.selected_method,
+              }
+            }
+          : null
+      );
+      
+      addLogMessage('system', '🤖 <strong>AI Recommendation Agent</strong> analysis is ready! Open the Recommendation or Report tab to view.');
+      setIsAiLoading(false);
+      setAiLoadingStep(0);
+    } catch (err: any) {
+      stepIntervals.forEach(clearTimeout);
+      setAiError(err.message || 'Failed to generate AI recommendation.');
+      setIsAiLoading(false);
+      setAiLoadingStep(0);
+      addLogMessage('error', `AI Recommendation failed: ${err.message}. Mathematical results remain valid.`);
+    }
+  };
+
   const handleExecuteAllModels = async () => {
     setExecuteResult(null);
     setShowConfig(false);
-    
+    setIsAiLoading(false);
+    setAiError(null);
+    setAiLoadingStep(0);
+
     const execMsgId = addLogMessage(
       'agent',
       `⚙️ <strong>Execution Agent</strong> running reserving models concurrently on backend…`,
@@ -448,7 +514,7 @@ export default function Workspace() {
 
     const ldfsToUse = customLDFs.length > 0 ? customLDFs : triangle?.ldfs.slice(0, -1).map((s: any) => s[ldfBase] ?? 1.0) || [];
     const incurredLdfsToUse = customIncurredLDFs.length > 0 ? customIncurredLDFs : triangle?.incurred_ldfs?.slice(0, -1).map((s: any) => s[incurredLdfBase] ?? 1.0) || [];
-    
+
     const payload = {
       session_id: sessionId,
       configs: configs,
@@ -475,9 +541,13 @@ export default function Workspace() {
 
       setExecuteResult(data);
       updateLogMessage(execMsgId, 'Multi-model execution complete. Dashboard loaded.');
-      
+
       // Auto-switch to recommendation results once execute completes
       setActiveTab('comparison');
+
+      if (data.execution_id) {
+        fetchAiRecommendation(data.execution_id);
+      }
     } catch (e: any) {
       addLogMessage('error', `Execution failed: ${e.message}`);
       updateLogMessage(execMsgId, `Execution failed: ${e.message}`);
@@ -598,7 +668,7 @@ export default function Workspace() {
   const isTabEnabled = (tabId: string) => {
     if (tabId === 'dataset') return true;
     if (!sessionId || !summary) return false;
-    
+
     // Recommendations & Reports need execute results
     if (tabId === 'recommendation' || tabId === 'report') {
       return !!executeResult;
@@ -624,17 +694,17 @@ export default function Workspace() {
                 Reset & Re-upload
               </button>
             </div>
-            <SummaryView 
-              summary={summary} 
+            <SummaryView
+              summary={summary}
               currency={currency}
-              onProceed={() => setActiveTab('triangles')} 
+              onProceed={() => setActiveTab('triangles')}
               onUpdateMappings={handleUpdateMappings}
             />
           </div>
         ) : (
           <UploadZone onRunPipeline={handleRunPipeline} />
         );
-        
+
       case 'triangles':
         return triangle && summary ? (
           <TriangleView
@@ -716,6 +786,14 @@ export default function Workspace() {
           <RecommendationView
             data={executeResult}
             currency={currency}
+            isLoading={isAiLoading}
+            loadingStep={aiLoadingStep}
+            error={aiError}
+            onRetry={() => {
+              if (executeResult?.execution_id) {
+                fetchAiRecommendation(executeResult.execution_id);
+              }
+            }}
           />
         );
 
@@ -725,6 +803,14 @@ export default function Workspace() {
             data={executeResult}
             summary={summary}
             currency={currency}
+            isLoading={isAiLoading}
+            loadingStep={aiLoadingStep}
+            error={aiError}
+            onRetry={() => {
+              if (executeResult?.execution_id) {
+                fetchAiRecommendation(executeResult.execution_id);
+              }
+            }}
           />
         );
 
@@ -757,13 +843,12 @@ export default function Workspace() {
                     setShowConfig(!executeResult);
                   }
                 }}
-                className={`px-3.5 py-1.5 text-[11px] font-bold rounded transition-all whitespace-nowrap cursor-pointer ${
-                  active
+                className={`px-3.5 py-1.5 text-[11px] font-bold rounded transition-all whitespace-nowrap cursor-pointer ${active
                     ? 'bg-accent text-white shadow-sm'
                     : enabled
-                    ? 'text-text-sub hover:text-text-main hover:bg-bg-1'
-                    : 'text-text-muted opacity-40 cursor-not-allowed'
-                }`}
+                      ? 'text-text-sub hover:text-text-main hover:bg-bg-1'
+                      : 'text-text-muted opacity-40 cursor-not-allowed'
+                  }`}
               >
                 {t.label}
               </button>
@@ -773,8 +858,8 @@ export default function Workspace() {
 
         {/* Header Right Settings & Controls */}
         <div className="flex items-center gap-2.5">
-          <select 
-            value={currency} 
+          <select
+            value={currency}
             onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
             className="px-2 py-1.5 bg-bg-2 border border-border rounded text-xs text-text-sub font-semibold hover:border-border-2 outline-none cursor-pointer h-8"
           >
@@ -782,15 +867,14 @@ export default function Workspace() {
               <option key={k} value={k}>{v.label}</option>
             ))}
           </select>
-          
+
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-2 border border-border rounded text-xs text-text-sub font-semibold hover:border-border-2 hover:text-text-main transition-colors cursor-pointer h-8"
           >
             <div
-              className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                apiKey ? 'bg-accent-green' : 'bg-text-muted'
-              }`}
+              className={`w-1.5 h-1.5 rounded-full transition-colors ${apiKey ? 'bg-accent-green' : 'bg-text-muted'
+                }`}
               title={apiKey ? 'AI API connected' : 'AI not connected'}
             />
             AI Settings

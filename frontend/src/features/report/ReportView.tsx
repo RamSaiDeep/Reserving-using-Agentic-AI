@@ -7,14 +7,95 @@ interface ReportViewProps {
   data: ExecuteResult | null;
   summary: SummaryData | null;
   currency?: CurrencyCode;
+  isLoading?: boolean;
+  loadingStep?: number;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
-export default function ReportView({ data, summary, currency = 'USD' }: ReportViewProps) {
+export default function ReportView({
+  data,
+  summary,
+  currency = 'USD',
+  isLoading = false,
+  loadingStep = 0,
+  error = null,
+  onRetry
+}: ReportViewProps) {
   const currentDate = useMemo(() => new Date().toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
   }), []);
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center border border-accent-red/20 rounded-xl p-8 bg-accent-red/5 font-sans max-w-xl mx-auto my-12 text-center space-y-4 shadow-sm">
+        <div className="text-3xl">⚠️</div>
+        <h3 className="text-sm font-bold text-accent-red">AI Report Generation Failed</h3>
+        <p className="text-xs text-text-sub leading-relaxed max-w-md">
+          Unable to generate the AI actuarial report. Mathematical reserving results remain valid.
+        </p>
+        <p className="text-[10px] font-mono text-text-muted bg-black/20 p-2.5 rounded border border-border-2 max-w-md break-all">
+          {error}
+        </p>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="px-4 py-2 bg-accent hover:bg-accent/90 text-white rounded text-xs font-bold transition-all cursor-pointer shadow-[0_2px_10px_rgba(91,124,250,0.3)] border-none"
+          >
+            🔄 Retry Report Generation
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (isLoading || (!data?.ai_recommendation && isLoading)) {
+    const steps = [
+      { id: 1, label: 'Mathematical reserving completed' },
+      { id: 2, label: 'Comparing reserving methods' },
+      { id: 3, label: 'AI reviewing diagnostics' },
+      { id: 4, label: 'Preparing actuarial recommendation' },
+    ];
+    
+    return (
+      <div className="flex flex-col items-center justify-center h-[400px] space-y-6 font-sans max-w-md mx-auto">
+        <div className="relative w-12 h-12 flex items-center justify-center">
+          <div className="absolute inset-0 animate-ping rounded-full h-full w-full bg-accent/20"></div>
+          <div className="relative animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-accent"></div>
+        </div>
+        <div className="text-center">
+          <h3 className="text-sm font-bold text-text-main">AI Reserving Agent Active</h3>
+          <p className="text-xs text-text-sub mt-1">Analyzing model results and generating actuarial report...</p>
+        </div>
+        <div className="w-full bg-bg-1 border border-border rounded-xl p-5 space-y-3.5 shadow-sm text-left">
+          {steps.map((s) => {
+            const isCompleted = loadingStep > s.id;
+            const isActive = loadingStep === s.id;
+            return (
+              <div key={s.id} className="flex items-center gap-3 text-xs">
+                {isCompleted ? (
+                  <span className="text-accent-green font-bold text-sm select-none">✓</span>
+                ) : isActive ? (
+                  <span className="animate-pulse text-accent font-bold text-sm select-none">⏳</span>
+                ) : (
+                  <span className="text-text-muted opacity-40 font-bold text-sm select-none">○</span>
+                )}
+                <span className={`${
+                  isCompleted ? 'text-text-main font-semibold' :
+                  isActive ? 'text-accent font-bold animate-pulse' :
+                  'text-text-muted opacity-50'
+                }`}>
+                  {s.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   const reportContent = useMemo(() => {
     if (!data || !summary) return null;
