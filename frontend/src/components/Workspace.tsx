@@ -777,6 +777,8 @@ export default function Workspace() {
               data={executeResult}
               currency={currency}
               onBack={() => setShowConfig(true)}
+              sessionId={sessionId!}
+              getApiUrl={getApiUrl}
             />
           );
         }
@@ -811,6 +813,8 @@ export default function Workspace() {
                 fetchAiRecommendation(executeResult.execution_id);
               }
             }}
+            sessionId={sessionId!}
+            getApiUrl={getApiUrl}
           />
         );
 

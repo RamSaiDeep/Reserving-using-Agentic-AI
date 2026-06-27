@@ -11,6 +11,8 @@ interface ReportViewProps {
   loadingStep?: number;
   error?: string | null;
   onRetry?: () => void;
+  sessionId: string;
+  getApiUrl: (endpoint: string) => string;
 }
 
 export default function ReportView({
@@ -20,8 +22,48 @@ export default function ReportView({
   isLoading = false,
   loadingStep = 0,
   error = null,
-  onRetry
+  onRetry,
+  sessionId,
+  getApiUrl
 }: ReportViewProps) {
+  const [auditState, setAuditState] = React.useState<Record<string, any>>({});
+  const [editingRule, setEditingRule] = React.useState<string | null>(null);
+  const [overrideText, setOverrideText] = React.useState<string>('');
+  const [overrideCategory, setOverrideCategory] = React.useState<string>('');
+
+  React.useEffect(() => {
+    if (data?.compliance_audit) {
+      setAuditState(data.compliance_audit);
+    } else {
+      setAuditState({});
+    }
+  }, [data]);
+
+  const handleOverrideSubmit = async () => {
+    if (!editingRule || !overrideText.trim()) return;
+    
+    try {
+      const res = await fetch(getApiUrl('override_compliance'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          category: overrideCategory,
+          rule: editingRule,
+          rationale: overrideText
+        })
+      });
+      const resData = await res.json();
+      if (!resData.success) throw new Error(resData.error);
+      
+      setAuditState(resData.compliance_audit);
+      setEditingRule(null);
+      setOverrideText('');
+    } catch (e: any) {
+      alert(`Override failed: ${e.message}`);
+    }
+  };
+
   const currentDate = useMemo(() => new Date().toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'long',
@@ -295,6 +337,90 @@ export default function ReportView({
           )}
         </div>
       </div>
+
+      {/* ── Section 6: ASOP Compliance Audit Report ── */}
+      {auditState && Object.keys(auditState).length > 0 && (
+        <div className="space-y-4 border-t border-border pt-6">
+          <h3 className="text-sm font-bold text-accent uppercase tracking-wider border-b border-border pb-1 flex items-center gap-2">
+            <svg className="w-4 h-4 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            6. ASOP Compliance Audit Report
+          </h3>
+          <p className="text-xs text-text-sub leading-relaxed">
+            Deterministic check rules executed dynamically to verify compliance with actuarial standards of practice:
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {Object.entries(auditState).map(([category, rules]) => (
+              <div key={category} className="bg-bg-2 border border-border rounded-lg p-5 space-y-4">
+                <div className="text-[11px] font-bold text-accent-dim uppercase tracking-wider border-b border-border pb-2">
+                  {category}
+                </div>
+                <div className="space-y-4">
+                  {(rules as any[]).map((ruleObj, idx) => (
+                    <div key={idx} className="space-y-1.5 pb-3 border-b border-border/20 last:border-none last:pb-0">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-xs font-semibold text-text-main leading-snug">
+                          {ruleObj.rule}
+                        </div>
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border flex-shrink-0 select-none ${
+                          ruleObj.status === 'PASS' ? 'bg-accent-green/10 text-accent-green border-accent-green/20' :
+                          ruleObj.status === 'FAIL' ? 'bg-accent-red/10 text-accent-red border-accent-red/20' :
+                          ruleObj.status === 'WARNING' ? 'bg-accent-amber/10 text-accent-amber border-accent-amber/20' :
+                          ruleObj.status.includes('OVERRIDDEN') ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                          'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                        }`}>
+                          {ruleObj.status.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-text-muted leading-relaxed">
+                        {ruleObj.details}
+                      </div>
+                      
+                      {ruleObj.status !== 'PASS' && !ruleObj.status.includes('OVERRIDDEN') && (
+                        <div className="mt-2.5">
+                          {editingRule === ruleObj.rule ? (
+                            <div className="flex flex-col gap-2 bg-bg-3 border border-border rounded p-3 mt-1.5 animate-slide-in">
+                              <textarea
+                                className="w-full bg-bg border border-border rounded p-2 text-xs text-text-main focus:outline-none focus:border-accent resize-none placeholder-text-muted"
+                                rows={2}
+                                placeholder="Document actuarial rationale to override this warning/failure..."
+                                value={overrideText}
+                                onChange={e => setOverrideText(e.target.value)}
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button 
+                                  onClick={() => { setEditingRule(null); setOverrideText(''); }} 
+                                  className="px-2.5 py-1 text-[10px] font-bold text-text-sub hover:text-text-main uppercase tracking-wider bg-transparent border-none cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button 
+                                  onClick={handleOverrideSubmit} 
+                                  className="px-2.5 py-1 text-[10px] font-bold bg-accent hover:bg-accent-hover text-white rounded uppercase tracking-wider border-none cursor-pointer"
+                                >
+                                  Submit Override
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setEditingRule(ruleObj.rule); setOverrideCategory(category); setOverrideText(''); }}
+                              className="text-[10px] font-bold text-accent hover:text-accent-hover bg-transparent border-none cursor-pointer uppercase tracking-wider mt-1"
+                            >
+                              + Document Override Rationale
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Signature & Disclaimer Footer */}
       <div className="border-t border-border pt-6 text-[10px] text-text-muted space-y-1 text-center font-mono">

@@ -1,118 +1,28 @@
 'use client';
 import React, { useRef, useEffect, useState } from 'react';
 import { ChatMessage } from '@/types';
+import { marked } from 'marked';
+
+// Configure marked options
+marked.use({
+  breaks: true,
+  gfm: true
+});
 
 function parseMarkdownToHtml(markdown: string): string {
   if (!markdown) return '';
-
-  let html = markdown
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  const lines = html.split('\n');
-  const processedLines: string[] = [];
-  let inTable = false;
-  let tableRows: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.startsWith('|') && line.endsWith('|')) {
-      inTable = true;
-      const cells = line.split('|').map(c => c.trim()).slice(1, -1);
-      const isSeparator = cells.every(c => /^[-:]+$/.test(c));
-      if (isSeparator) {
-        continue;
-      }
-      tableRows.push(cells.map(c => '<td>' + c + '</td>').join(''));
-    } else {
-      if (inTable) {
-        let tableHtml = '<table class="min-w-full border-collapse border border-border my-2 text-left text-xs">';
-        if (tableRows.length > 0) {
-          const headerRow = tableRows[0].replace(/<td>/g, '<th class="border border-border p-1 bg-bg-2 font-semibold">').replace(/<\/td>/g, '</th>');
-          tableHtml += '<thead><tr>' + headerRow + '</tr></thead><tbody>';
-          for (let j = 1; j < tableRows.length; j++) {
-            const bodyRow = tableRows[j].replace(/<td>/g, '<td class="border border-border p-1">');
-            tableHtml += '<tr>' + bodyRow + '</tr>';
-          }
-          tableHtml += '</tbody>';
-        }
-        tableHtml += '</table>';
-        processedLines.push(tableHtml);
-        inTable = false;
-        tableRows = [];
-      }
-      processedLines.push(lines[i]);
-    }
+  try {
+    let html = marked.parse(markdown) as string;
+    
+    // Process math blocks
+    html = html.replace(/\\\[([\s\S]*?)\\\]/g, '<div class="math-block bg-bg-2 border border-border rounded p-2 my-1.5 font-mono text-xs overflow-x-auto">$1</div>');
+    html = html.replace(/\\\(([^)]*?)\\\)/g, '<span class="math-inline font-mono text-xs bg-bg-2 border border-border rounded px-1">$1</span>');
+    
+    return html;
+  } catch (e) {
+    console.error("Markdown parsing failed, falling back to raw:", e);
+    return markdown;
   }
-
-  if (inTable && tableRows.length > 0) {
-    let tableHtml = '<table class="min-w-full border-collapse border border-border my-2 text-left text-xs">';
-    const headerRow = tableRows[0].replace(/<td>/g, '<th class="border border-border p-1 bg-bg-2 font-semibold">').replace(/<\/td>/g, '</th>');
-    tableHtml += '<thead><tr>' + headerRow + '</tr></thead><tbody>';
-    for (let j = 1; j < tableRows.length; j++) {
-      const bodyRow = tableRows[j].replace(/<td>/g, '<td class="border border-border p-1">');
-      tableHtml += '<tr>' + bodyRow + '</tr>';
-    }
-    tableHtml += '</tbody></table>';
-    processedLines.push(tableHtml);
-  }
-
-  html = processedLines.join('\n');
-
-  html = html.replace(/\\\[([\s\S]*?)\\\]/g, '<div class="math-block bg-bg-2 border border-border rounded p-2 my-1.5 font-mono text-xs overflow-x-auto">$1</div>');
-  html = html.replace(/\\\(([^)]*?)\\\)/g, '<span class="math-inline font-mono text-xs bg-bg-2 border border-border rounded px-1">$1</span>');
-  html = html.replace(/`([^`]+)`/g, '<code class="font-mono text-xs bg-bg-2 border border-border rounded px-1">$1</code>');
-  html = html.replace(/^# (.+)$/gm, '<strong class="text-text-main text-xs block mt-2 mb-1">$1</strong>');
-
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-  html = html.replace(/_(.*?)_/g, '<em>$1</em>');
-
-  const lines2 = html.split('\n');
-  const processedLines2: string[] = [];
-  let inList = false;
-
-  for (let i = 0; i < lines2.length; i++) {
-    const line = lines2[i];
-    const match = line.match(/^(\s*)(•|-|\*)\s+(.*)$/);
-    if (match) {
-      if (!inList) {
-        processedLines2.push('<ul class="list-disc pl-4 my-1 flex flex-col gap-0.5">');
-        inList = true;
-      }
-      processedLines2.push('<li>' + match[3] + '</li>');
-    } else {
-      if (inList) {
-        processedLines2.push('</ul>');
-        inList = false;
-      }
-      processedLines2.push(line);
-    }
-  }
-  if (inList) {
-    processedLines2.push('</ul>');
-  }
-
-  html = processedLines2.join('\n');
-
-  html = html
-    .replace(/<table.*?>\n/g, m => m.trim())
-    .replace(/<\/table>\n/g, '</table>')
-    .replace(/<thead>\n/g, '<thead>')
-    .replace(/<\/thead>\n/g, '</thead>')
-    .replace(/<tbody>\n/g, '<tbody>')
-    .replace(/<\/tbody>\n/g, '</tbody>')
-    .replace(/<tr>\n/g, '<tr>')
-    .replace(/<\/tr>\n/g, '</tr>')
-    .replace(/<ul.*?>\n/g, m => m.trim())
-    .replace(/<\/ul>\n/g, '</ul>')
-    .replace(/<\/li>\n/g, '</li>');
-
-  html = html.replace(/\n/g, '<br />');
-
-  return html;
 }
 
 interface SidebarChatProps {
